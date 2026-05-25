@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import shlex
 from pathlib import Path
 
 
@@ -45,6 +47,7 @@ def test_prepare_claude_home_materializes_local_settings_and_skills_dirs(tmp_pat
     assert not runtime_claude_json.is_symlink()
     runtime_data = json.loads(runtime_claude_json.read_text(encoding="utf-8"))
     assert runtime_data["hasCompletedOnboarding"] is True
+    assert runtime_data["skipDangerousModePermissionPrompt"] is True
 
     runtime_settings = runtime_home / ".claude" / "settings.json"
     runtime_skills = runtime_home / ".claude" / "skills"
@@ -127,6 +130,7 @@ def test_prepare_claude_home_materializes_local_onboarding_file_when_real_home_i
     assert not runtime_claude_json.is_symlink()
     assert runtime_data["hasCompletedOnboarding"] is True
     assert runtime_data["hasSeenWelcome"] is True
+    assert runtime_data["skipDangerousModePermissionPrompt"] is True
     assert runtime_data["lastOnboardingVersion"] == "1.2.3"
     assert runtime_data["customFlag"] == "keep-me"
     real_data = json.loads((real_home / ".claude.json").read_text(encoding="utf-8"))
@@ -168,3 +172,78 @@ def test_prepare_claude_home_seeds_onboarding_stub_when_real_file_missing(tmp_pa
     assert runtime_claude_json.is_file()
     assert not runtime_claude_json.is_symlink()
     assert '"hasCompletedOnboarding": true' in runtime_claude_json.read_text(encoding="utf-8")
+    assert '"skipDangerousModePermissionPrompt": true' in runtime_claude_json.read_text(encoding="utf-8")
+
+
+def test_prepare_claude_host_oauth_state_patches_only_host_onboarding_and_trust(tmp_path: Path) -> None:
+    real_home = tmp_path / "real_home"
+    workdir = tmp_path / "workspace"
+    real_home.mkdir(parents=True)
+    workdir.mkdir(parents=True)
+    claude_dir = real_home / ".claude"
+    claude_dir.mkdir(parents=True)
+    settings_path = claude_dir / "settings.json"
+    settings_path.write_text('{"theme":"dark"}\n', encoding="utf-8")
+    (real_home / ".claude.json").write_text(
+        json.dumps(
+            {
+                "hasCompletedOnboarding": False,
+                "hasSeenWelcome": False,
+                "lastOnboardingVersion": "2.1.126",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = _run_bash(
+        real_home,
+        f"prepare_claude_host_oauth_state {shlex.quote(str(real_home))} {shlex.quote(str(workdir))}",
+    )
+
+    assert result.returncode == 0, result.stderr
+    data = json.loads((real_home / ".claude.json").read_text(encoding="utf-8"))
+    assert data["hasCompletedOnboarding"] is True
+    assert data["hasSeenWelcome"] is True
+    assert data["skipDangerousModePermissionPrompt"] is True
+    assert data["lastOnboardingVersion"] == "2.1.126"
+    assert data["projects"][str(workdir)]["hasTrustDialogAccepted"] is True
+    assert data["projects"][str(workdir)]["hasCompletedProjectOnboarding"] is True
+    assert settings_path.read_text(encoding="utf-8") == '{"theme":"dark"}\n'
+
+
+def test_run_claude_runtime_oauth_branch_seeds_host_onboarding_before_exec(tmp_path: Path) -> None:
+    real_home = tmp_path / "real_home"
+    workdir = tmp_path / "workspace"
+    real_home.mkdir(parents=True)
+    workdir.mkdir(parents=True)
+    (real_home / ".claude").mkdir(parents=True)
+    (real_home / ".claude.json").write_text('{"hasCompletedOnboarding":false}\n', encoding="utf-8")
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(parents=True)
+    log_file = tmp_path / "claude.log"
+    (bin_dir / "claude").write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "cat \"$HOME/.claude.json\" > \"${CLAUDE_LOG_FILE:?}\"\n",
+        encoding="utf-8",
+    )
+    (bin_dir / "claude").chmod(0o755)
+
+    result = _run_bash(
+        real_home,
+        f"run_claude_runtime oauth {shlex.quote(str(workdir))} test-claude-session",
+        extra_env={
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "CLAUDE_LOG_FILE": str(log_file),
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    data = json.loads(log_file.read_text(encoding="utf-8"))
+    assert data["hasCompletedOnboarding"] is True
+    assert data["hasSeenWelcome"] is True
+    assert data["skipDangerousModePermissionPrompt"] is True
+    assert data["projects"][str(workdir)]["hasTrustDialogAccepted"] is True
+    assert data["projects"][str(workdir)]["hasCompletedProjectOnboarding"] is True

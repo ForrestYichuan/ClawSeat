@@ -2,6 +2,7 @@
 set -euo pipefail
 
 DRY_RUN=0; PROJECT="install"; REPO_ROOT_OVERRIDE=""; FORCE_REPO_ROOT=""
+INSTALL_MODE="single"; INSTALL_TEAMS=""  # v3 multi-team mode (spec §4.1 §12)
 _PROJECT_EXPLICIT=0; _TEMPLATE_EXPLICIT=0  # set to 1 when flag is passed explicitly
 UNINSTALL_PROJECT=""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,6 +11,7 @@ CLAWSEAT_ROOT="${CLAWSEAT_ROOT_OVERRIDE:-$REPO_ROOT}"
 PYTHON_BIN_WAS_SET="${PYTHON_BIN+1}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 FORCE_REINSTALL=0
+OPEN_NATIVE_WINDOWS=1
 PROVISION_KEYS=0
 ENABLE_AUTO_PATROL=0
 LOAD_ALL_SKILLS=0
@@ -193,6 +195,7 @@ parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --dry-run) DRY_RUN=1; shift ;;
+      --no-window|--no-windows) OPEN_NATIVE_WINDOWS=0; shift ;;
       --detect-only) DETECT_ONLY=1; shift ;;
       --project) PROJECT="$2"; _PROJECT_EXPLICIT=1; shift 2 ;;
       --repo-root) REPO_ROOT_OVERRIDE="$2"; shift 2 ;;
@@ -218,6 +221,8 @@ parse_args() {
       --enable-auto-patrol) ENABLE_AUTO_PATROL=1; shift ;;
       --load-all-skills) LOAD_ALL_SKILLS=1; shift ;;
       --template) CLAWSEAT_TEMPLATE_NAME="$2"; _TEMPLATE_EXPLICIT=1; shift 2 ;;
+      --mode) INSTALL_MODE="$2"; shift 2 ;;
+      --teams) INSTALL_TEAMS="$2"; shift 2 ;;
       --reset-harness-memory)
         "$PYTHON_BIN" - "$REPO_ROOT" <<'PY'
 import sys
@@ -232,9 +237,13 @@ PY
         exit 0
         ;;
       --help|-h) cat <<'EOF'
-Usage: scripts/install.sh [--project <name>] [--repo-root <path>] [--force-repo-root <path>] [--template clawseat-engineering|clawseat-creative|clawseat-solo] [--memory-tool claude|codex|gemini] [--memory-model <model>] [--provider <mode|n>] [--all-api-provider <mode>] [--base-url <url> --api-key <key> [--model <name>]] [--provision-keys] [--reinstall|--force] [--uninstall <project>] [--enable-auto-patrol] [--load-all-skills] [--detect-only] [--dry-run] [--reset-harness-memory]
+Usage: scripts/install.sh [--project <name>] [--mode single|multi --teams <csv>] [--repo-root <path>] [--force-repo-root <path>] [--template clawseat-engineering|clawseat-creative|clawseat-minimal|clawseat-solo] [--memory-tool claude|codex|gemini] [--memory-model <model>] [--provider <mode|n>] [--all-api-provider <mode>] [--base-url <url> --api-key <key> [--model <name>]] [--provision-keys] [--reinstall|--force] [--uninstall <project>] [--enable-auto-patrol] [--load-all-skills] [--detect-only] [--dry-run] [--no-window] [--reset-harness-memory]
+--mode multi --teams a,b,c   v3 multi-team flow (delegates to install_multi.sh; reads approved configs from tasks/<project>/_config-proposals/).
+--template clawseat-minimal  v3 MULTI_TEAM_MINIMAL; seeds planner+builder subteams plus quality-docs, then delegates to --mode multi.
+--template clawseat-solo     legacy alias for v3 MULTI_TEAM_MINIMAL; seeds planner+builder subteams plus quality-docs, then delegates to --mode multi.
 --repo-root sets the target project repo; --force-repo-root overrides the ClawSeat install code root.
 --detect-only prints one JSON environment summary and exits.
+--no-window skips native iTerm workers/memories windows; tmux seats still launch.
 --provider now controls the memory seat only; use --all-api-provider for global api-seat provider override.
 --provision-keys prompts for missing template API keys and writes ~/.agents/.env.global.
 
@@ -252,7 +261,8 @@ Non-TTY environments (agent-launcher sandbox, CI, detached agent sessions) must 
 Templates (--template):
   clawseat-engineering   5-seat engineering flow (memory + planner + builder + reviewer + patrol), gstack-bound
   clawseat-creative      5-seat cartooner-bound creative team (memory + writer + builder-image + builder-av + patrol)
-  clawseat-solo          3-seat minimal flow (memory + builder + planner), all OAuth
+  clawseat-minimal       v3 MULTI_TEAM_MINIMAL (project-memory + one or more planner+builder subteams + quality-docs)
+  clawseat-solo          legacy alias for MULTI_TEAM_MINIMAL (project-memory + one or more planner+builder subteams + quality-docs)
 EOF
         exit 0
         ;;
@@ -263,9 +273,16 @@ EOF
     [[ "$UNINSTALL_PROJECT" =~ ^[a-z0-9-]+$ ]] || die 2 INVALID_PROJECT "--uninstall project must match ^[a-z0-9-]+$"
   fi
   [[ "$PROJECT" =~ ^[a-z0-9-]+$ ]] || die 2 INVALID_PROJECT "project must match ^[a-z0-9-]+$"
+  case "$INSTALL_MODE" in
+    single|multi) ;;
+    *) die 2 INVALID_MODE "--mode must be single | multi, got: $INSTALL_MODE" ;;
+  esac
+  if [[ "$INSTALL_MODE" == "multi" && -z "$INSTALL_TEAMS" && "$CLAWSEAT_TEMPLATE_NAME" != "clawseat-minimal" && "$CLAWSEAT_TEMPLATE_NAME" != "clawseat-solo" ]]; then
+    die 2 INVALID_FLAGS "--mode multi requires --teams <csv> (e.g. core,content,shell)"
+  fi
   case "$CLAWSEAT_TEMPLATE_NAME" in
-    clawseat-engineering|clawseat-creative|clawseat-solo) ;;
-    *) die 2 INVALID_TEMPLATE "--template must be clawseat-engineering | clawseat-creative | clawseat-solo, got: $CLAWSEAT_TEMPLATE_NAME" ;;
+    clawseat-engineering|clawseat-creative|clawseat-minimal|clawseat-solo) ;;
+    *) die 2 INVALID_TEMPLATE "--template must be clawseat-engineering | clawseat-creative | clawseat-minimal | clawseat-solo, got: $CLAWSEAT_TEMPLATE_NAME" ;;
   esac
   if [[ -n "$MEMORY_TOOL" ]]; then
     case "$MEMORY_TOOL" in
@@ -331,18 +348,51 @@ compute_project_paths() {
   BOOTSTRAP_TEMPLATE_PATH="$BOOTSTRAP_TEMPLATE_DIR/template.toml"
 }
 
+delegate_multi_team_install() {
+  local reason="${1:-multi}"
+  local multi_script="$REPO_ROOT/scripts/install_multi.sh"
+  [[ -x "$multi_script" ]] || die 2 MISSING_SCRIPT "install_multi.sh not found at $multi_script"
+  local multi_args=("--project" "$PROJECT")
+  [[ -n "$INSTALL_TEAMS" ]] && multi_args+=("--teams" "$INSTALL_TEAMS")
+  [[ "$DRY_RUN" == "1" ]] && multi_args+=("--dry-run")
+  [[ -n "$REPO_ROOT_OVERRIDE" ]] && multi_args+=("--repo-root" "$REPO_ROOT_OVERRIDE")
+  if [[ "$CLAWSEAT_TEMPLATE_NAME" == "clawseat-minimal" || "$CLAWSEAT_TEMPLATE_NAME" == "clawseat-solo" ]]; then
+    multi_args+=("--seed-template" "multi-team-minimal" "--seed-archetype" "auto" "--template-name" "clawseat-minimal")
+    if [[ "$CLAWSEAT_TEMPLATE_NAME" == "clawseat-solo" ]]; then
+      printf '==> clawseat-solo is a legacy alias for v3 MULTI_TEAM_MINIMAL; delegating to install_multi.sh\n' >&2
+    else
+      printf '==> clawseat-minimal uses v3 MULTI_TEAM_MINIMAL; delegating to install_multi.sh\n' >&2
+    fi
+  else
+    printf '==> v3 multi-team mode: delegating to install_multi.sh (teams=%s)\n' "$INSTALL_TEAMS" >&2
+  fi
+  [[ -n "$reason" ]] && printf '==> multi-team delegate reason: %s\n' "$reason" >&2
+  exec "$multi_script" "${multi_args[@]}"
+}
+
 main() {
   parse_args "$@"
   if [[ "$DETECT_ONLY" == "1" ]]; then
     detect_all
     exit 0
   fi
-  self_update_check "$@"
   if [[ -n "$UNINSTALL_PROJECT" ]]; then
     uninstall_project_registry_entry "$UNINSTALL_PROJECT"
     exit 0
   fi
+  # v3 multi-team mode (Phase 1 minimal bridge — spec §12)
+  # Delegates to install_multi.sh; legacy single flow runs only when --mode=single (default).
+  if [[ "$INSTALL_MODE" == "multi" ]]; then
+    delegate_multi_team_install "explicit --mode multi"
+  fi
+  if [[ ( "$CLAWSEAT_TEMPLATE_NAME" == "clawseat-minimal" || "$CLAWSEAT_TEMPLATE_NAME" == "clawseat-solo" ) && "$_TEMPLATE_EXPLICIT" == "1" ]]; then
+    delegate_multi_team_install "explicit --template $CLAWSEAT_TEMPLATE_NAME"
+  fi
+  self_update_check "$@"
   prompt_kind_first_flow; resolve_pending_seats; normalize_provider_choice
+  if [[ "$CLAWSEAT_TEMPLATE_NAME" == "clawseat-minimal" || "$CLAWSEAT_TEMPLATE_NAME" == "clawseat-solo" ]]; then
+    delegate_multi_team_install "interactive $CLAWSEAT_TEMPLATE_NAME selection"
+  fi
   run_legacy_path_migration
   if [[ "$DRY_RUN" == "1" ]]; then
     printf '[dry-run] CLAWSEAT_TEMPLATE_NAME=%s\n' "$CLAWSEAT_TEMPLATE_NAME" >&2
@@ -376,25 +426,29 @@ main() {
   install_seat_clear_watchdog
   install_patrol_bootstrap
 
-  # v2 split window topology (per RFC-001 §3): one workers window per project +
-  # one shared memories window across all projects (rebuilt on each install).
-  if [[ "$PRIMARY_SEAT_ID" == "memory" ]]; then
-    note "Step 7a: open per-project workers window (${#PENDING_SEATS[@]} template workers)"
-    open_iterm_window "$(workers_payload)" GRID_WINDOW_ID
+  if [[ "$OPEN_NATIVE_WINDOWS" == "1" ]]; then
+    # v2 split window topology (per RFC-001 §3): one workers window per project +
+    # one shared memories window across all projects (rebuilt on each install).
+    if [[ "$PRIMARY_SEAT_ID" == "memory" ]]; then
+      note "Step 7a: open per-project workers window (${#PENDING_SEATS[@]} template workers)"
+      open_iterm_window "$(workers_payload)" GRID_WINDOW_ID
 
-    [[ ! -f "$REPO_ROOT/scripts/cleanup-stale-memories-window.sh" ]] || bash "$REPO_ROOT/scripts/cleanup-stale-memories-window.sh" || true
-    note "Step 7b: ensure shared memories window (tab per project)"
-    local _memories_payload
-    _memories_payload="$(memories_payload)"
-    if [[ -n "$_memories_payload" && "$_memories_payload" != *'"status": "skip"'* ]]; then
-      local _mem_window_id=""
-      open_iterm_window "$_memories_payload" _mem_window_id
+      [[ ! -f "$REPO_ROOT/scripts/cleanup-stale-memories-window.sh" ]] || bash "$REPO_ROOT/scripts/cleanup-stale-memories-window.sh" || true
+      note "Step 7b: ensure shared memories window (tab per project)"
+      local _memories_payload
+      _memories_payload="$(memories_payload)"
+      if [[ -n "$_memories_payload" && "$_memories_payload" != *'"status": "skip"'* ]]; then
+        local _mem_window_id=""
+        open_iterm_window "$_memories_payload" _mem_window_id
+      else
+        warn "memories_payload returned skip — no project memory tmux sessions found"
+      fi
     else
-      warn "memories_payload returned skip — no project memory tmux sessions found"
+      # Legacy single-window topology for imported ancestor-primary templates.
+      note "Step 7: open legacy iTerm worker grid"; open_iterm_window "$(grid_payload)" GRID_WINDOW_ID
     fi
   else
-    # Legacy single-window topology for imported ancestor-primary templates.
-    note "Step 7: open legacy iTerm worker grid"; open_iterm_window "$(grid_payload)" GRID_WINDOW_ID
+    note "Step 7: skip native iTerm windows (--no-window); tmux seats remain available for embedded xterm attach"
   fi
 
   # v1 LEGACY (M4 remove): machine-memory-claude tmux session may still be running on machines

@@ -33,18 +33,23 @@ run_codex_runtime() {
   local auth_mode="$1"
   local workdir="$2"
   local session_name="$3"
-  local -a resume_args=()
+  # resume_cmd is a PREFIX (subcommand + positional), not a suffix flag.
+  # Newer codex CLI only accepts resume as a subcommand: `codex resume <uuid>`
+  # or `codex resume --last`. The old `codex --resume <uuid>` form was
+  # silently rejected as an unrecognized top-level flag, so this path was
+  # effectively dead before. Fallback to --last when the hook-written
+  # .session file is absent (seat killed before clean exit) is added
+  # per-branch below, after CODEX_HOME is finalized.
+  local -a resume_cmd=()
   local resume_label=""
   local resume_session_id=""
 
   if [[ "${CLAWSEAT_NO_AUTO_RESUME:-0}" != "1" ]]; then
     resume_session_id="$(launcher_read_active_session_id "${CLAWSEAT_SEAT:-}" 2>/dev/null || true)"
     if [[ -n "$resume_session_id" ]]; then
-      resume_args=(--resume "$resume_session_id")
+      resume_cmd=(resume "$resume_session_id")
       resume_label="$resume_session_id"
     fi
-    # No --last fallback: codex CLI rejects '--last' as a top-level flag.
-    # When no prior session id is recorded, start fresh (no resume args).
   fi
 
   if [[ "$auth_mode" == "chatgpt" ]]; then
@@ -58,8 +63,15 @@ run_codex_runtime() {
     echo " Directory:  $workdir"
     echo " CODEX_HOME: $CODEX_HOME"
     echo "────────────────────────────────────────"
+    # Crash-recovery: hook didn't fire but cwd has codex history → --last.
+    # `codex resume --last` filters by cwd internally (unless --all).
+    if [[ -z "$resume_label" && "${CLAWSEAT_NO_AUTO_RESUME:-0}" != "1" ]] \
+        && _has_codex_history "$CODEX_HOME"; then
+      resume_cmd=(resume --last)
+      resume_label="--last (latest in cwd)"
+    fi
     [[ -n "$resume_label" ]] && launcher_resume_banner "$resume_label" >&2
-    exec codex --dangerously-bypass-approvals-and-sandbox -C "$workdir" ${resume_args[@]+"${resume_args[@]}"}
+    exec codex ${resume_cmd[@]+"${resume_cmd[@]}"} --dangerously-bypass-approvals-and-sandbox -C "$workdir"
   fi
 
   local secret_file="" runtime_dir
@@ -134,12 +146,18 @@ PY
   echo " HOME:       $HOME"
   echo " CODEX_HOME: $CODEX_HOME"
   echo "────────────────────────────────────────"
+  # Crash-recovery fallback (see chatgpt branch above for rationale).
+  if [[ -z "$resume_label" && "${CLAWSEAT_NO_AUTO_RESUME:-0}" != "1" ]] \
+      && _has_codex_history "$CODEX_HOME"; then
+    resume_cmd=(resume --last)
+    resume_label="--last (latest in cwd)"
+  fi
   [[ -n "$resume_label" ]] && launcher_resume_banner "$resume_label" >&2
   if [[ "$auth_mode" == "custom" ]]; then
     if [[ -n "${LAUNCHER_CUSTOM_MODEL:-}" ]]; then
-      exec codex --dangerously-bypass-approvals-and-sandbox -C "$workdir" -c model_provider=customapi -m "${LAUNCHER_CUSTOM_MODEL}" ${resume_args[@]+"${resume_args[@]}"}
+      exec codex ${resume_cmd[@]+"${resume_cmd[@]}"} --dangerously-bypass-approvals-and-sandbox -C "$workdir" -c model_provider=customapi -m "${LAUNCHER_CUSTOM_MODEL}"
     fi
-    exec codex --dangerously-bypass-approvals-and-sandbox -C "$workdir" -c model_provider=customapi ${resume_args[@]+"${resume_args[@]}"}
+    exec codex ${resume_cmd[@]+"${resume_cmd[@]}"} --dangerously-bypass-approvals-and-sandbox -C "$workdir" -c model_provider=customapi
   fi
-  exec codex --dangerously-bypass-approvals-and-sandbox -C "$workdir" ${resume_args[@]+"${resume_args[@]}"}
+  exec codex ${resume_cmd[@]+"${resume_cmd[@]}"} --dangerously-bypass-approvals-and-sandbox -C "$workdir"
 }

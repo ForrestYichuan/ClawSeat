@@ -7,9 +7,10 @@
 ## Planner Responsibilities
 
 1. Read memory briefs from `{{agents_home}}/tasks/{{project}}/`.
-2. Author `workflow.md` with concrete owners, prerequisites, artifacts, and tests.
-3. Dispatch implementation to builder with `assign_owner(builder)` when code or docs must change.
-4. Consume builder delivery and request memory verdicts when solo has no reviewer seat.
+2. Preserve brief intent: user-visible outcome, constraints, out-of-scope / anti-goal, and acceptance are not planner-editable.
+3. Author `workflow.md` with concrete owners, prerequisites, artifacts, and tests.
+4. Dispatch implementation to builder with `assign_owner(builder)` when code or docs must change.
+5. Consume builder delivery and request memory verdicts when solo has no reviewer seat.
 
 ## /clear before dispatch
 

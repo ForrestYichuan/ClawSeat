@@ -12,14 +12,17 @@ def test_memory_skill_documents_dispatch_protocol_and_absent_planner_fallback() 
     lowered = text.lower()
 
     assert "dispatch protocol" in lowered
+    assert "agent_admin.py brief queue" in text
+    assert "memory→planner" in text
+    assert "runtime rejects v3 memory→planner use" in text
     assert "dispatch_task.py" in text
     assert "send-and-verify" in text
     assert "absent-planner" in lowered
     assert "profile-dynamic.toml" in text
-    assert "Verify Ack" in text
-    assert "--profile" in text
-    assert "--target-role" in text
+    assert "Verify queued dispatch" in text
+    assert "--project <project>" in text
+    assert "--team <team>" in text
 
-    match = re.search(r"Verify Ack 4-step after dispatch:(.*?)(?:\n## |\Z)", text, flags=re.S)
+    match = re.search(r"Verify queued dispatch:(.*?)(?:\n## |\Z)", text, flags=re.S)
     assert match is not None
     assert len(re.findall(r"^\d+\.", match.group(1), flags=re.M)) >= 4

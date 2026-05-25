@@ -273,13 +273,18 @@ ensure_host_deps() {
     exit 0
   fi
   if [[ "$DRY_RUN" == "1" ]]; then
-    printf '[dry-run] %q %q --project %q --phase bootstrap\n' \
-      "$PYTHON_BIN" "$REPO_ROOT/core/preflight.py" "$PROJECT"
+    local -a pf_dry_args=("$PYTHON_BIN" "$REPO_ROOT/core/preflight.py" "--project" "$PROJECT" "--phase" "bootstrap")
+    [[ "${OPEN_NATIVE_WINDOWS:-1}" != "1" ]] && pf_dry_args+=("--no-window")
+    printf '[dry-run] '
+    printf '%q ' "${pf_dry_args[@]}"
+    printf '\n'
     return 0
   fi
 
   local pf_out="" pf_rc=0
-  if pf_out="$("$PYTHON_BIN" "$REPO_ROOT/core/preflight.py" --project "$PROJECT" --phase bootstrap 2>&1)"; then
+  local -a pf_args=("$REPO_ROOT/core/preflight.py" "--project" "$PROJECT" "--phase" "bootstrap")
+  [[ "${OPEN_NATIVE_WINDOWS:-1}" != "1" ]] && pf_args+=("--no-window")
+  if pf_out="$("$PYTHON_BIN" "${pf_args[@]}" 2>&1)"; then
     pf_rc=0
   else
     pf_rc=$?

@@ -30,4 +30,4 @@ If both markers could apply in the same turn:
 
 ## Role exceptions
 
-**planner must NOT emit `[CLEAR-REQUESTED]`** — planner maintains cross-step workflow state and decision context across the chain. Clearing planner context loses active task ids, dispatch decisions, blockers, and owner assignments. Planner uses `[COMPACT-REQUESTED]` only.
+**planner must NOT emit `[CLEAR-REQUESTED]`** — planner maintains cross-step workflow state and decision context across the chain. Clearing planner context loses active task ids, dispatch decisions, blockers, and owner assignments. Planner asks memory to compact with `[memory: compact-me]` in relay text instead of emitting direct stop-hook lifecycle markers.

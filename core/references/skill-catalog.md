@@ -7,9 +7,8 @@ Generated foundation catalog for planner routing and skill discovery. Run `pytho
 - `~/.agents/skills/` - ClawSeat project and machine workflow skills.
 - `~/.claude/skills/` - gstack and local Claude skills.
 - `~/.claude/plugins/marketplaces/` - Anthropic/Claude marketplace plugin docs.
-- `core/references/superpowers-borrowed/` - imported engineering practice references.
 
-Total unique entries in this catalog: 143.
+Total unique entries in this catalog: 132.
 
 | Skill | Source | Purpose | When to use | Command form |
 | --- | --- | --- | --- | --- |
@@ -145,14 +144,3 @@ Total unique entries in this catalog: 143.
 | telegram | ~/.claude/plugins/marketplaces/ | Telegram | Use when the matching workflow is requested | Skill: telegram |
 | typescript-lsp | ~/.claude/plugins/marketplaces/ | typescript-lsp | Use when the matching workflow is requested | Skill: typescript-lsp |
 | writing-hookify-rules | ~/.claude/plugins/marketplaces/ | This skill should be used when the user asks to "create a hookify rule", "write a hook rule", "configure hookify", "a... | Use when the matching workflow is requested | Skill: writing-hookify-rules |
-| ATTRIBUTION | core/references/superpowers-borrowed/ | Attribution | Planner or specialist needs a borrowed engineering practice | Skill: ATTRIBUTION |
-| brainstorming | core/references/superpowers-borrowed/ | You MUST use this before any creative work - creating features, building components, adding functionality, or modifyi... | Planner or specialist needs a borrowed engineering practice | Skill: brainstorming |
-| executing-plans | core/references/superpowers-borrowed/ | Use when you have a written implementation plan to execute in a separate session with review checkpoints | Planner or specialist needs a borrowed engineering practice | Skill: executing-plans |
-| finishing-a-development-branch | core/references/superpowers-borrowed/ | Use when implementation is complete, all tests pass, and you need to decide how to integrate the work - guides comple... | Planner or specialist needs a borrowed engineering practice | Skill: finishing-a-development-branch |
-| receiving-code-review | core/references/superpowers-borrowed/ | Use when receiving code review feedback, before implementing suggestions, especially if feedback seems unclear or tec... | Planner or specialist needs a borrowed engineering practice | Skill: receiving-code-review |
-| requesting-code-review | core/references/superpowers-borrowed/ | Use when completing tasks, implementing major features, or before merging to verify work meets requirements | Planner or specialist needs a borrowed engineering practice | Skill: requesting-code-review |
-| subagent-driven-development | core/references/superpowers-borrowed/ | Use when executing implementation plans with independent tasks in the current session | Planner or specialist needs a borrowed engineering practice | Skill: subagent-driven-development |
-| systematic-debugging | core/references/superpowers-borrowed/ | Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes | Planner or specialist needs a borrowed engineering practice | Skill: systematic-debugging |
-| test-driven-development | core/references/superpowers-borrowed/ | Use when implementing any feature or bugfix, before writing implementation code | Planner or specialist needs a borrowed engineering practice | Skill: test-driven-development |
-| verification-before-completion | core/references/superpowers-borrowed/ | Use when about to claim work is complete, fixed, or passing, before committing or creating PRs - requires running ver... | Planner or specialist needs a borrowed engineering practice | Skill: verification-before-completion |
-| writing-plans | core/references/superpowers-borrowed/ | Use when you have a spec or requirements for a multi-step task, before touching code | Planner or specialist needs a borrowed engineering practice | Skill: writing-plans |

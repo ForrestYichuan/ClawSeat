@@ -1,6 +1,6 @@
 ---
 name: gstack-harness
-description: Multi-seat harness orchestration for document-driven engineering teams. Use when you need to bootstrap a seat roster, start seats, dispatch tasks, complete handoffs with durable ACKs, record handoff/state.db receipts, coordinate optional async transports, provision frontstage heartbeat, or render a CLI operator console for a project profile.
+description: "Multi-seat harness: bootstrap roster, start seats, dispatch tasks, complete handoffs with durable ACKs, provision frontstage heartbeat, render CLI operator console for a project profile."
 ---
 
 # Gstack Harness

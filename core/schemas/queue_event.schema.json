@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "clawseat://schemas/queue_event.schema.json",
+  "title": "ClawSeat tasks.queue.jsonl event (v3 §4.3)",
+  "description": "Immutable event-stream record. One JSON object per line, append-only. Readers collapse by task_id, taking last valid event.",
+  "type": "object",
+  "required": ["event_type", "event_ts", "seq", "actor", "task_id"],
+  "properties": {
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "task_created",
+        "task_claimed",
+        "task_in_progress",
+        "task_waiting_for",
+        "task_done",
+        "task_failed",
+        "task_bounced",
+        "task_reset"
+      ]
+    },
+    "event_ts": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO8601 with timezone. Monotonic per task_id required."
+    },
+    "seq": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Strictly monotonic seq across the entire queue file. Helper read last seq + 1 inside flock."
+    },
+    "actor": {
+      "type": "string",
+      "pattern": "^(memory|patrol|operator|[a-z0-9-]+@(claude|codex|gemini))$",
+      "description": "Format: 'memory' | 'patrol' | 'operator' | '<role>@<tool>' (e.g. 'planner@claude')."
+    },
+    "task_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+    }
+  },
+  "oneOf": [
+    {
+      "properties": {
+        "event_type": {"const": "task_created"},
+        "brief_path": {"type": "string"},
+        "parent_task_id": {"type": ["string", "null"]},
+        "depends_on": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["brief_path"]
+    },
+    {
+      "properties": {
+        "event_type": {"const": "task_claimed"}
+      }
+    },
+    {
+      "properties": {
+        "event_type": {"const": "task_in_progress"}
+      }
+    },
+    {
+      "properties": {
+        "event_type": {"const": "task_waiting_for"},
+        "waiting_for": {"type": "string", "description": "Upstream task_id blocking this claim"}
+      },
+      "required": ["waiting_for"]
+    },
+    {
+      "properties": {
+        "event_type": {"const": "task_done"},
+        "verdict": {"const": "PASS"}
+      },
+      "required": ["verdict"]
+    },
+    {
+      "properties": {
+        "event_type": {"const": "task_failed"},
+        "verdict": {"const": "FAIL"},
+        "fail_reason": {"type": "string"}
+      },
+      "required": ["verdict"]
+    },
+    {
+      "properties": {
+        "event_type": {"const": "task_bounced"},
+        "bounce_reason": {"type": "string"}
+      },
+      "required": ["bounce_reason"]
+    },
+    {
+      "properties": {
+        "event_type": {"const": "task_reset"},
+        "reset_reason": {"type": "string", "enum": ["claimed_timeout", "operator_request", "infra_crash"]}
+      },
+      "required": ["reset_reason"]
+    }
+  ]
+}

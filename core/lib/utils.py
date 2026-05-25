@@ -6,16 +6,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover
-    try:
-        import tomli as tomllib  # type: ignore[no-redef]
-    except ModuleNotFoundError as exc:  # pragma: no cover
-        raise ModuleNotFoundError(
-            "clawseat requires Python 3.11+ OR tomli installed for Python <3.11. "
-            "Install with: pip install tomli"
-        ) from exc
+import sys as _sys, pathlib as _pl
+_utils_scripts = str(_pl.Path(__file__).resolve().parent.parent / "scripts")
+if _utils_scripts not in _sys.path: _sys.path.insert(0, _utils_scripts)
+from _toml_compat import loads_safe as _toml_loads, load_safe as _toml_load
 
 
 def now_iso() -> str:
@@ -39,4 +33,4 @@ def load_toml(path: Path | str, *, missing_ok: bool = False) -> dict[str, Any] |
     if missing_ok and not toml_path.exists():
         return None
     with toml_path.open("rb") as handle:
-        return tomllib.load(handle)
+        return _toml_load(handle)

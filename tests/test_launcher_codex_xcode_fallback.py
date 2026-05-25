@@ -173,9 +173,18 @@ def test_agent_launcher_codex_exec_sites_all_include_yolo_flag() -> None:
     text = (_REPO / "core" / "launchers" / "runtimes" / "codex.sh").read_text(
         encoding="utf-8"
     )
-    needle = 'exec codex --dangerously-bypass-approvals-and-sandbox -C "$workdir"'
-
-    assert text.count(needle) == 4
+    # All 4 exec codex sites must include --dangerously-bypass-approvals-and-sandbox
+    # paired with -C "$workdir". Line-based check so resume_cmd injection or
+    # any future arg reordering doesn't break the invariant test.
+    exec_lines = [line for line in text.splitlines() if line.lstrip().startswith("exec codex")]
+    assert len(exec_lines) == 4, (
+        f"expected 4 codex exec sites, found {len(exec_lines)}: {exec_lines}"
+    )
+    for line in exec_lines:
+        assert "--dangerously-bypass-approvals-and-sandbox" in line, (
+            f"exec codex site missing yolo flag: {line}"
+        )
+        assert '-C "$workdir"' in line, f"exec codex site missing -C workdir: {line}"
 
 
 # ── Secret-sync tests for FIX-CODEX-XCODE-SECRET-SYNC ───────────────────────

@@ -1,17 +1,16 @@
 from pathlib import Path
 
 
-def test_planner_swallow_forbids_core_ux_pass_without_bounce_or_escalation() -> None:
-    text = Path("core/skills/planner/SKILL.md").read_text(encoding="utf-8")
+def test_planner_skill_excludes_project_specific_core_ux_gate() -> None:
+    planner = Path("core/skills/planner/SKILL.md").read_text(encoding="utf-8")
 
-    assert "SWALLOW PASS DENIED" in text
-    assert "core_ux: true" in text
-    assert "core_ux_swallow_blocked" in text
+    assert "### Core UX gate" not in planner
+    assert "SWALLOW PASS DENIED" not in planner
+    assert "core_ux_swallow_blocked" not in planner
 
 
-def test_planner_strict_fanin_enforces_core_ux_gate() -> None:
-    text = Path("core/skills/planner/SKILL.md").read_text(encoding="utf-8")
+def test_core_ux_gate_note_remains_outside_planner_hot_path() -> None:
+    builder = Path("core/skills/builder/SKILL.md").read_text(encoding="utf-8")
 
-    assert "core_ux_gate" in text
-    assert "BLOCKED" in text
-    assert "core_ux=true" in text
+    assert "Core UX gate note" in builder
+    assert "core_ux_gate" in builder

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -80,6 +81,30 @@ class TestSeatResolverTmux:
         assert result.transport == "tmux-send-keys"
         assert result.session_name == "hardening-b-planner-claude"
         assert result.target == "planner"
+
+    def test_tmux_session_toml_fallback_when_toml_modules_are_unavailable(
+        self,
+        tmp_agents_root,
+        tmp_openclaw_home,
+        monkeypatch,
+    ):
+        """session.toml resolution must work in Python runtimes without tomllib/tomli."""
+        session_dir = tmp_agents_root / "sessions" / "hardening-b" / "planner"
+        session_dir.mkdir(parents=True)
+        (session_dir / "session.toml").write_text('session = "hardening-b-planner-claude"\n')
+        monkeypatch.setitem(sys.modules, "tomllib", None)
+        monkeypatch.setitem(sys.modules, "tomli", None)
+
+        result = resolve_seat(
+            target="planner",
+            profile_seats=["planner"],
+            profile_project_name="hardening-b",
+            profile_handoff_dir=tmp_agents_root / "handoffs",
+            _openclaw_home=tmp_openclaw_home,
+        )
+
+        assert result.kind == "tmux"
+        assert result.session_name == "hardening-b-planner-claude"
 
     def test_tmux_seat_no_session_toml(self, tmp_agents_root, tmp_openclaw_home):
         """target in seats but no session.toml → session_name None (still tmux kind)."""

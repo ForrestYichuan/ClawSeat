@@ -135,10 +135,11 @@ def _query_seat_liveness_table(
         select.append("session_name")
         order_session_col = "session_name"
     elif "seat_id" in columns:
-        select.append("seat_id")
         order_session_col = "seat_id"
     else:
         return []
+    if "seat_id" in columns:
+        select.append("seat_id")
 
     query = f"SELECT {', '.join(select)} FROM seat_liveness WHERE status = 'alive'"
     params: list[Any] = []
@@ -163,7 +164,7 @@ def _query_seats_table(
         return []
     rows = conn.execute(
         """
-        SELECT role, session_name, status, last_heartbeat
+        SELECT seat_id, role, session_name, status, last_heartbeat
         FROM seats
         WHERE project = ?
           AND status IN ('alive', 'live')
@@ -185,12 +186,15 @@ def _normalize_row(
 ) -> dict[str, str]:
     heartbeat = str(row[heartbeat_col] or "")
     session_name = row["session_name"] if "session_name" in row.keys() else row["seat_id"]
-    return {
+    normalized = {
         "role": str(row["role"]),
         "session_name": str(session_name),
         "status": "alive",
         "last_heartbeat_ts": heartbeat,
     }
+    if "seat_id" in row.keys():
+        normalized["seat_id"] = str(row["seat_id"])
+    return normalized
 
 
 def _has_table(conn: sqlite3.Connection, table_name: str) -> bool:

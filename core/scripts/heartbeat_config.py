@@ -25,10 +25,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from real_home import real_user_home  # noqa: E402
 
-try:
-    import tomllib  # type: ignore[attr-defined]
-except ImportError:  # pragma: no cover
-    import tomli as tomllib  # type: ignore[no-redef]
+from _toml_compat import loads_safe as _toml_loads, load_safe as _toml_load
 
 HEARTBEAT_SCHEMA_VERSION = 1
 DEFAULT_CADENCE = "10min"
@@ -116,7 +113,7 @@ def load_config(project: str, *, home: Path | None = None) -> dict[str, Any] | N
     path = config_path(project, home=home)
     if not path.exists():
         return None
-    raw = tomllib.loads(path.read_text(encoding="utf-8"))
+    raw = _toml_loads(path.read_text(encoding="utf-8"))
     return dict(raw)
 
 

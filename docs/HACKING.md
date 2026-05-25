@@ -175,12 +175,27 @@ readlink $(which lark-cli)
 **跑测试**：
 
 ```bash
-python3 -m pytest tests/ -q
+bash scripts/test-fast.sh        # 快速分层: 默认排除 host/slow
+python3 -m pytest tests/ -q      # 完整本地套件
+python3 -m pytest tests/ -q --durations=50
+python3 scripts/test-suite-audit.py   # 审计 legacy/compat/removal 守卫测试
+
 # 或针对某块：
 python3 -m pytest tests/test_lark_cli_wrapper.py tests/test_launcher_project_tool_seed.py -q
 ```
 
-~2200+ 测试 3 分钟内跑完。
+测试分层 marker:
+
+- `host`: 依赖维护者工作站状态、真实本地 repo、真实 profile 或用户级工具。
+- `slow`: 触发 install 路径、稳定窗口等待或大量子进程的慢 smoke。
+- `legacy`: 保护 deprecated / compatibility 行为，删除前必须单独审。
+- `script`: shell / CLI / subprocess 表面测试。
+
+CI 仍跑完整 `tests/`，但带 `--durations=50` 输出慢测试榜。日常迭代优先用
+`scripts/test-fast.sh`，改 install / launcher / real-home 路径时再跑完整套件。
+`legacy` 标记不等于“可删除”：它通常表示兼容、迁移或已移除路径的回归守卫。
+需要清理时先跑 `python3 scripts/test-suite-audit.py`，按 `migration_or_compat` /
+`removal_guard` / `stale_comment` / `review` 分类逐项处理。
 
 ## Fork 路径
 

@@ -130,3 +130,28 @@ def test_memory_template_contains_role_plus_shared_skills_and_stop_hook(tmp_path
     assert hook_def["type"] == "command"
     assert hook_def["command"].endswith("/scripts/hooks/memory-stop-hook.sh")
     assert hook_def["timeout"] == 10
+
+
+def test_dynamic_seat_template_uses_engineer_role_hint(tmp_path: Path) -> None:
+    engineers_root = tmp_path / "home" / ".agents" / "engineers"
+    engineer_dir = engineers_root / "builder-tools-planner"
+    engineer_dir.mkdir(parents=True)
+    (engineer_dir / "engineer.toml").write_text(
+        "\n".join(
+            [
+                'id = "builder-tools-planner"',
+                'role = "planner-dispatcher"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    template_dir = ensure_seat_claude_template(engineers_root, "builder-tools-planner")
+
+    assert {path.name for path in (template_dir / "skills").iterdir()} == {
+        "planner",
+        "clawseat",
+        "gstack-harness",
+        "tmux-basics",
+    }

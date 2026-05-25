@@ -16,10 +16,10 @@ for _p in (str(_REPO_ROOT), str(_REPO_ROOT / "core" / "lib"), str(_REPO_ROOT / "
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-try:
-    import tomllib
-except ImportError:  # pragma: no cover
-    import tomli as tomllib  # type: ignore[no-redef]
+import sys as _sys, pathlib as _pl
+_fc_scripts = str(_pl.Path(__file__).resolve().parent.parent / "scripts")
+if _fc_scripts not in _sys.path: _sys.path.insert(0, _fc_scripts)
+from _toml_compat import loads_safe as _toml_loads, load_safe as _toml_load
 
 from machine_config import (  # noqa: E402
     MachineConfig,
@@ -309,7 +309,7 @@ def validate_profile_v2(
 ) -> ValidationResult:
     """Parse v2 profile + cross-validate against machine.toml. Never raises except on I/O."""
     try:
-        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+        raw = _toml_loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return ValidationResult(ok=False, errors=[f"profile not found: {path}"])
     except Exception as exc:
@@ -320,7 +320,7 @@ def validate_profile_v2(
 def validate_machine_config(path: Path) -> ValidationResult:
     """Parse machine.toml and enforce §3 rules."""
     try:
-        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+        raw = _toml_loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return ValidationResult(ok=False, errors=[f"machine.toml not found: {path}"])
     except Exception as exc:

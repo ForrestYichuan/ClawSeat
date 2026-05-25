@@ -1,6 +1,6 @@
 # ClawSeat
 
-## OpenClaw × gstack × superpowers × tmux = 一支住在你 Mac 里的 AI 研发团队
+## OpenClaw × gstack × tmux = 一支住在你 Mac 里的 AI 研发团队
 
 不上云。不订阅。在你的 Mac 上。
 
@@ -8,7 +8,6 @@
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-black)](docs/INSTALL.md)
 [![OpenClaw](https://img.shields.io/badge/built%20on-OpenClaw-purple)](https://github.com/openclaw/openclaw)
 [![gstack](https://img.shields.io/badge/powered%20by-gstack-orange)](https://github.com/garrytan/gstack)
-[![superpowers](https://img.shields.io/badge/practices%20from-superpowers-9b72cb)](https://github.com/obra/superpowers)
 [![PRs welcome](https://img.shields.io/badge/PRs-%E6%AC%A2%E8%BF%8E-brightgreen)](CONTRIBUTING.md)
 
 ---
@@ -49,10 +48,10 @@ clawseat-memories
 
 ---
 
-## 三个开源巨头，织进一台 Mac
+## 两个开源底座，织进一台 Mac
 
 不是 agent 框架。不是 SaaS。是约 350 个 bash + Python 文件的一层薄壳，
-把三个已经证明自己的开源项目缝在一起。
+把已经证明自己的开源能力接成可见、可控、可审计的本地研发团队。
 
 ### 左：OpenClaw — agent **是谁**
 
@@ -69,34 +68,23 @@ sandbox、独立 memory。心跳机制让它主动行动，不只被动回复。
 `/qa` 是定位→修→验；`/investigate` 是根因→法则→证据；`/cso` 是安全审计。
 每一个本身就是一套完整流程。
 
-### 上：superpowers — agent **怎么想事**
-
-[superpowers](https://github.com/obra/superpowers)（Jesse Vincent，MIT，
-2026-04-27 集成）是 Anthropic 内部沉淀出来的工程实践。十个 SKILL：
-brainstorming / writing-plans / executing-plans / TDD /
-systematic-debugging / verification-before-completion /
-requesting-code-review / receiving-code-review /
-finishing-a-development-branch / subagent-driven-development。
-
-不是 prompt 技巧。是工程师的 default 反射——**什么时候该想，什么时候该写，
-什么时候该验**。
-
-### 中间：ClawSeat — 把三层叠在一起
+### 中间：ClawSeat — 把身份、技能、协议叠在一起
 
 每个 seat 不只是一个 prompt。它有**三层**。
 
 身份：OpenClaw 给。
 技能：gstack 给。
-方法：superpowers 给。
+协议：ClawSeat 自己给，包括 memory/planner/builder/reviewer/patrol 的边界、
+dispatch / completion / ACK、team ownership、liveness、review 和验收规则。
 
-| seat | 身份 | 技能 | 方法 |
+| seat | 身份 | 技能 | 协议 |
 |---|---|---|---|
-| memory | OpenClaw memory agent | gstack `/cs` 系列 | brainstorming / writing-plans / verification |
-| planner | OpenClaw planner agent | `/plan-eng-review` `/plan-ceo-review` | writing-plans / executing-plans / finishing-a-branch |
-| builder | OpenClaw builder agent | `/ship` `/investigate` `/land-and-deploy` | executing-plans / TDD / code-review × 2 / subagent-driven-dev |
-| reviewer | OpenClaw reviewer agent | `/review` | receiving-code-review / verification-before-completion |
-| patrol | OpenClaw patrol agent | scheduled evidence scans | verification-before-completion / systematic-debugging |
-| designer | OpenClaw designer agent | `/design-review` `/design-shotgun` | brainstorming |
+| memory | OpenClaw memory agent | ClawSeat memory skills | intake / KB / team ownership / acceptance |
+| planner | OpenClaw planner agent | planning and review helpers | workflow / owner_seat / fan-out / fan-in |
+| builder | OpenClaw builder agent | implementation helpers | code / tests / DELIVERY / handoff receipt |
+| reviewer | OpenClaw reviewer agent | `/review` style checks | verdict / contract drift / evidence |
+| patrol | OpenClaw patrol agent | scheduled evidence scans | regression / drift / health patrol |
+| designer | OpenClaw designer agent | `/design-review` `/design-shotgun` | UX / visual / content quality |
 
 ---
 
@@ -104,11 +92,11 @@ finishing-a-development-branch / subagent-driven-development。
 
 | 模板 | seat | 适合 | 卖点 |
 |---|---|---|---|
-| **`clawseat-solo`** | memory(claude) + builder(codex) + planner(gemini) | 想用三家大厂 OAuth 跑闭环的人 | **零 API key**——三家 free quota 全用上 |
+| **`clawseat-solo`** | v3 `MULTI_TEAM_MINIMAL` alias: memory + planner+builder 子项目组 + quality-docs | 想用最小项目组启动并后续横向扩多个 solo 单元的人 | 单 memory 管多个最小开发组 |
 | `clawseat-creative` | memory + writer + builder-image + builder-av + patrol | 创作链（图片 / 视频 / 音频 / 分镜） | 绑 cartooner skill；cartooner-harness 协议层 |
 | `clawseat-engineering` | memory + planner + builder + reviewer + patrol | 工程链（brief→plan→code→review→merge） | 绑 gstack skill；有 reviewer 守 diff |
 
-> `solo` 是大多数人该选的——OAuth-only，无 key 泄露面，跑得动 80% 的活。
+> `solo` 已降级为兼容别名；新语义是 v3 multi-team 的最小项目组。每个开发子组都是 planner+builder，项目级 memory 统一验收和扩容。
 
 ---
 
@@ -242,7 +230,6 @@ auto-resume 让重启完整恢复 6-pane state、codex capacity 限流自动 ret
 | **LangChain / AutoGen** | Python 框架写 agent 流程 | 零 DSL；流程是 SKILL.md 自然语言 + 8 intent enum |
 | **OpenClaw 单用** | 多通道 AI 助手 | 把它扩成研发团队，配 iTerm 双窗口 + state.db ledger + memory graph |
 | **gstack 单用** | 30+ Claude Code skill | 按 seat 角色分发，planner 派一句 intent 就自动激活正确咒语 |
-| **superpowers 单用** | 一组 SKILL.md 工程实践 | 把 practice 嵌进每个 seat 的 SKILL，让方法变成 seat 的肌肉记忆 |
 | **gbrain / Mem0 / Letta** | LLM-driven 记忆系统 | typed-link graph 零 LLM、零 embedding、纯 regex，可 grep 可 git diff |
 
 **ClawSeat 不取代任何一个**——是把你已经信的几个缝合成一个你能**看见**的
@@ -276,8 +263,10 @@ cd ~/ClawSeat && ./scripts/install.sh --project demo
 
 **Q: 这玩意只在 Mac 上能跑？**
 
-现在是。我们用 iTerm 网格 + macOS Keychain 路由 + LaunchAgent。Linux 能
-跑核心功能但少了网格可视化。Windows 没测试。欢迎 PR——绝不 trivial。
+独立使用时基本是 Mac-first：默认 iTerm 网格 + macOS Keychain 路由 +
+LaunchAgent。配合 Cartooner / 内嵌终端使用时可以走 `--no-window`，只启动
+tmux seats，不依赖 iTerm 可视化窗口。Linux 能跑核心功能但少了原生网格可视化。
+Windows 没测试。欢迎 PR——绝不 trivial。
 
 **Q: 不用 Docker 怎么隔离 agent？**
 
@@ -291,11 +280,12 @@ cd ~/ClawSeat && ./scripts/install.sh --project demo
 不会。零网络请求出去 ClawSeat。直接向你配的 provider 发请求。零 telemetry,
 零 phone-home。grep 整个代码库搜 `http` 验证。
 
-**Q: solo 模板真的不要 API key？**
+**Q: solo 模板现在是什么？**
 
-真的。memory 跑 Claude OAuth（你的 Pro 配额）、builder 跑 Codex OAuth、
-planner 跑 Gemini OAuth。三家 free quota 全用上，跑 80% 的日常迭代不要
-一分钱 API。
+它不再是独立 single-mode 三 seat。`--template clawseat-solo` 会 seed v3
+`MULTI_TEAM_MINIMAL` proposals：一个 project-memory、一个最小
+planner+builder 子项目组，以及 `quality-docs`。multi-team 可以继续增加
+多个这样的最小开发组。
 
 **Q: state.db 会损坏吗？**
 
@@ -309,17 +299,15 @@ planner 跑 Gemini OAuth。三家 free quota 全用上，跑 80% 的日常迭代
 benchmark 上 graph-only 已经 P@5 49.1 / R@5 97.9,vector 加进去
 +1% 不到。我们选了 graph 这半，因为它零依赖、可 grep、可 git diff。
 
-**Q: superpowers 是什么时候加的？**
+**Q: 为什么不集成外部 practice skill？**
 
-2026-04-27。导入 commit `6efe32c9`。十个 SKILL.md 原样存
-[`core/references/superpowers-borrowed/`](core/references/superpowers-borrowed/),
-每个 seat 在自己 SKILL.md 的"Borrowed Practices"段落引用——不改原文，
-不污染上游。Attribution 在
-[`ATTRIBUTION.md`](core/references/superpowers-borrowed/ATTRIBUTION.md)。
+ClawSeat 的 seat 协议已经覆盖“什么时候拆、派给谁、怎么验、怎么回执”。
+外部 practice 文档容易把 seat 引向 ClawSeat 之外的命令、目录和子 agent 假设；
+因此当前版本不再把外部 practice 作为 skill/catalog/seat 上下文暴露。
 
 **Q: 一个月烧多少 token？**
 
-`solo` 模板配 OAuth 跑日常迭代基本免费。
+`solo` alias 走 v3 multi-team minimal；成本取决于后续项目组扩容和 seat provider。
 重负载混搭（Claude Opus + Codex API + Gemini 2.5 Pro）一天 $10–30。
 建议轻量 seat 用 minimax-M2 这种国产 API,Opus 留给 memory + planner。
 
@@ -349,7 +337,6 @@ git 能 bisect。
 | [`core/references/handoff-receipt-protocol.md`](core/references/handoff-receipt-protocol.md) | 完成必须两步 |
 | [`core/skills/gstack-harness/references/communication-protocol.md`](core/skills/gstack-harness/references/communication-protocol.md) | 8 intent + send-and-verify 唯一 transport |
 | [`core/skills/planner/references/collaboration-rules.md`](core/skills/planner/references/collaboration-rules.md) | 派工首选规则 + swallow semantics |
-| [`core/references/superpowers-borrowed/`](core/references/superpowers-borrowed/) | Jesse Vincent 的十个工程实践原文 |
 
 ## 仓库角色
 
@@ -360,4 +347,4 @@ git 能 bisect。
 
 ## 许可
 
-MIT。ClawSeat、OpenClaw、gstack、superpowers 全是。
+MIT。ClawSeat、OpenClaw、gstack 全是。

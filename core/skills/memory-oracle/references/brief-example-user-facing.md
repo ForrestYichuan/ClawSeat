@@ -4,6 +4,12 @@
 A product-facing feature modifies user-visible behavior and must include acceptance checks.
 
 ```markdown
+Goal: the exact user-visible result and where it must appear.
+Context: only the facts needed to start.
+Boundary: allowed files/actions and no-go areas.
+Anti-goal: weaker implementation that must not count as done.
+Acceptance: observable behavior, tests, or artifact evidence.
+
 user_facing: true
 product_acceptance_criteria:
   - [ ] 关键验收项 1：运行 `python3 -m pytest`，关键路径测试通过。

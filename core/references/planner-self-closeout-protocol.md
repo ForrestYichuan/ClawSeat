@@ -8,7 +8,7 @@ immediately hands the chain back to memory.
 Run `complete_handoff.py` with:
 
 ```bash
-complete_handoff.py --source planner --target memory --task-id <id> --status completed --verdict <V> --notify
+complete_handoff.py --source <exact planner seat> --target memory --task-id <id> --status completed --verdict <V> --notify
 ```
 
 The durable receipt is still the primary relay path. `send-and-verify.sh` is
@@ -28,6 +28,25 @@ and continue.
 
 When planner relays to memory, `planner/DELIVERY.md` should carry the branch,
 commit, sweep count, and the one-line summary extracted from builder DELIVERY.
+
+## Review/latest validation
+
+Each ClawSeat project owns one project-local validation worktree for
+`review/latest`; never share it across projects. Builders never merge
+`review/latest` or `main`, and planners never merge directly to `main`.
+Planner closeout reports branch/commit evidence, tests, and blocker/conflict
+files; it does not merge `review/latest`.
+
+Memory integrates accepted planner deliveries into that project's own
+`review/latest` worktree. On conflict: stop and report; do not force-push and
+do not modify `main`.
+
+Memory is the final main-integration boundary: only after explicit user
+confirmation may memory merge from that project `review/latest` worktree to
+`main`. Memory closeout records user confirmation, `review/latest` hash, and
+main merge hash or blocker. Memory also owns desktop launch scripts so user
+review opens this project's `review/latest` worktree, not `main`, a shared
+global worktree, or a stale tmp worktree.
 
 ## Escape hatch
 

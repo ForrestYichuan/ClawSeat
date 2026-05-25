@@ -519,6 +519,25 @@ def main() -> int:
                 "The seat may be loading or stuck. Check the tmux pane manually: "
                 f"tmux attach -t $(agentctl.sh session-name {args.seat} --project {profile.project_name})"
             )
+    if onboarding_step == "claude_bypass_permissions":
+        # Claude Code 2.1.145+ shows an interactive "Yes, I accept" dialog for
+        # --dangerously-skip-permissions on first run in a new identity HOME.
+        # Auto-accept: ClawSeat seats are intentionally launched with this flag;
+        # requiring manual acceptance on every new identity blocks automation.
+        import subprocess as _sp
+        _bp_session = session_name
+        _sp.run(
+            ["tmux", "send-keys", "-t", _bp_session, "2", "Enter"],
+            capture_output=True,
+        )
+        print(
+            f"bypass_permissions_auto_accepted: "
+            f"sent '2\\nEnter' to {_bp_session} (--dangerously-skip-permissions is intentional)"
+        )
+        _time.sleep(3)
+        pane_text = capture_session_pane(profile, args.seat)
+        onboarding_step = detect_claude_onboarding_step(pane_text)
+
     if onboarding_step is not None:
         hint = ""
         # oauth_login / oauth_code / oauth_error steps (across claude/codex/

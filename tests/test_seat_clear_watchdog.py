@@ -267,3 +267,81 @@ def test_watchdog_multiple_handlers_fire_capacity_first_then_clear(tmp_path, mon
         ["send-keys", "-t", "install-planner-gemini", "/clear", "Enter"],
     ]
     assert _load_capacity_state(runtime_root)["retries"] == 3
+
+
+def test_watchdog_auto_compacts_live_non_claude_planner_when_queue_drained(tmp_path, monkeypatch) -> None:
+    tmux, tmux_send_log, _runtime_root = _setup_env(tmp_path, monkeypatch, "idle\n")
+    home = tmp_path / "home"
+    monkeypatch.setenv("FAKE_TMUX_SESSIONS", "install-team-planner-codex")
+
+    profile = home / ".agents" / "profiles" / "install-profile-dynamic.toml"
+    profile.parent.mkdir(parents=True, exist_ok=True)
+    profile.write_text(
+        """
+project_name = "install"
+seats = ["memory", "team-planner"]
+
+[mode]
+team_structure = "multi"
+project_memory = "memory"
+
+[teams]
+t = { seats = ["team-planner"] }
+
+[seat_roles]
+memory = "project-memory"
+team-planner = "planner"
+""".lstrip(),
+        encoding="utf-8",
+    )
+    queue = home / ".agents" / "tasks" / "install" / "t" / "tasks.queue.jsonl"
+    queue.parent.mkdir(parents=True, exist_ok=True)
+    queue.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "event_type": "task_created",
+                        "event_ts": "2026-05-20T00:00:00+00:00",
+                        "seq": 1,
+                        "actor": "memory",
+                        "task_id": "task-1",
+                        "brief_path": "tasks/install/t/brief/task-1.md",
+                    },
+                    sort_keys=True,
+                ),
+                json.dumps(
+                    {
+                        "event_type": "task_done",
+                        "event_ts": "2026-05-20T00:01:00+00:00",
+                        "seq": 2,
+                        "actor": "team-planner@codex",
+                        "task_id": "task-1",
+                        "verdict": "PASS",
+                    },
+                    sort_keys=True,
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    compact_send_log = tmp_path / "compact-send.log"
+    send_script = tmp_path / "send-compact.sh"
+    send_script.write_text(
+        "#!/usr/bin/env bash\nset -eu\nprintf '%s\\n' \"$*\" >> \"$COMPACT_SEND_LOG\"\n",
+        encoding="utf-8",
+    )
+    send_script.chmod(0o755)
+    monkeypatch.setenv("CLAWSEAT_PLANNER_COMPACT_SEND_SCRIPT", str(send_script))
+    monkeypatch.setenv("COMPACT_SEND_LOG", str(compact_send_log))
+
+    assert watchdog.main(["--once", "--tmux-bin", str(tmux)]) == 0
+
+    assert _sent_commands(tmux_send_log) == []
+    assert "--project install team-planner /compact" in compact_send_log.read_text(encoding="utf-8")
+    snapshot = home / ".agents" / "tasks" / "install" / "t" / "runtime" / "planner-compact" / "latest.md"
+    assert "- team: t" in snapshot.read_text(encoding="utf-8")
+
+    assert watchdog.main(["--once", "--tmux-bin", str(tmux)]) == 0
+    assert compact_send_log.read_text(encoding="utf-8").count("/compact") == 1

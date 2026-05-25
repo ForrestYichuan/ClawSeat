@@ -19,14 +19,20 @@ def test_workspace_protocol_reminder_content_is_role_specific() -> None:
     builder = _render("builder", engineer_id="builder")
     patrol = _render("patrol", engineer_id="patrol")
 
-    assert "Verify Ack" in memory
+    assert "Verify Queue" in memory
+    assert "Brief Fidelity" in memory
     assert "Chain end" in memory
-    assert "experience retention" in memory
+    assert "do not weaken product intent" in memory
+    assert "agent_admin.py brief planner-status --project <project>" in memory
+    assert "manual queue scans only if it fails or debugging needs detail" in memory
+    assert "readiness-sync" not in memory
     assert "NOT optional" not in memory
 
     assert "Strict fan-in" in planner
+    assert "Intent Fidelity" in planner
     assert "relay memory" in planner
-    assert "[COMPACT-REQUESTED]" in planner
+    assert "[memory: compact-me]" in planner
+    assert "never emit `[CLEAR-REQUESTED]`" in planner
 
     for specialist in (builder, patrol):
         assert "Closeout MANDATORY two-step" in specialist

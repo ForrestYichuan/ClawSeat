@@ -244,7 +244,7 @@ Recent structural changes:
 - **2026-04 — core/migration/ layer** — houses `*_dynamic.py` scripts that replace the legacy harness scripts for profiles with `[dynamic_roster].enabled = true`. Traffic flows through `core/transport/transport_router.py` so callers never pick the wrong path by hand.
 - **2026-04 — transport/payload consolidation (audit P0/P1)** — `build_notify_payload` extracted into `_task_io.py`, rendering/validation for codex provider config moved into a typed `CodexProviderConfig` dataclass, shells/*/adapter_shim.py collapsed onto `_shim_base.py`.
 - **2026-04 — install.sh enhancements** — `--repo-root` flag (FR-7) allows installing a project pointing to a different business repo (separate from the ClawSeat root); `--reset-harness-memory` clears per-seat harness choice history (FR-1 `last-harness.toml` persistence). `CLAWSEAT_FEISHU_ENABLED=0` env var disables all Feishu sends globally (send_delegation_report, planner stop-hook, announce helpers).
-- **2026-04 — project templates** — `--template` flag selects one of three built-in rosters: `clawseat-engineering` (5-seat with reviewer), `clawseat-creative` (5-seat cartooner-bound creative team), or `clawseat-solo` (3-seat). `PENDING_SEATS` and `seat_order` are now read dynamically from the template TOML; per-seat tool/auth/provider override each seat is carried into `project-local.toml`.
+- **2026-04 — project templates** — `--template` flag selects built-in install flows. `clawseat-engineering` and `clawseat-creative` are v2 flat rosters; `clawseat-solo` is now a legacy alias for v3 `MULTI_TEAM_MINIMAL`, where one project memory manages planner+builder subteams plus `quality-docs`.
 
 ### Project Templates
 
@@ -254,21 +254,25 @@ Three built-in project templates in `templates/`:
 |----------|-------|-------|----------|
 | `clawseat-engineering` | memory planner builder reviewer patrol | 5 | Engineering chain with reviewer (QA + visual review); seats use gstack-harness protocol + gstack skills |
 | `clawseat-creative` | memory writer builder-image builder-av patrol | 5 | Cartooner-bound creative team for short films, short dramas, MV; seats use cartooner skills (image / video / audio / storyboard / design / prompt); cartooner-harness protocol layer |
-| `clawseat-solo` | memory (claude oauth) + builder (codex oauth) + planner (gemini oauth) | 3 | Minimal collaboration chain with standard brief -> workflow -> dispatch -> verdict cycle |
+| `clawseat-solo` | project-memory + planner+builder subteam + quality-docs | v3 | Legacy alias for `MULTI_TEAM_MINIMAL`; one memory can manage many minimal solo units |
 
-### Solo Template (Minimal 3-Seat)
+### Solo Alias (Minimal v3 Project Group)
 
-`clawseat-solo` is a 3-seat alternative for minimal OAuth-only collaboration:
+`clawseat-solo` no longer has independent single-mode semantics. It is the
+legacy CLI alias for v3 `MULTI_TEAM_MINIMAL`: it seeds approved proposals and
+delegates to `install_multi.sh`. The reusable "solo" piece is the team-local
+planner+builder unit:
 
-| Seat | Tool | Role |
-|------|------|------|
-| memory | claude oauth | L3 hub, brief authoring, verdict |
-| builder | codex oauth | Implementation |
-| planner | gemini oauth | Workflow orchestration, dispatch |
+| Unit | Role |
+|------|------|
+| project-memory | top-level intake, team ownership, final acceptance |
+| subteam planner | research, workflow, exact builder dispatch, review/rework loop |
+| subteam builder | implementation and evidence |
+| quality-docs | continuous quality gate pulled by memory |
 
-No reviewer, patrol, or designer seats. Memory delegates orchestration to planner;
-builder self-reviews; memory issues final verdict. All seats use OAuth - no API
-keys required.
+Multi-team can run multiple planner+builder units under the same memory. If a
+subteam grows past one builder it needs a reviewer; past three builders, memory
+creates another subteam.
 
 **Creative template seat responsibilities** (`clawseat-creative`, cartooner-harness-bound):
 - `memory` (claude/minimax-api, **Vision Steward**): no-image-policy; maintains PROJECT_INDEX / generation_log via metadata only; coordinates lanes; escalates aesthetic decisions to user. MiniMax chosen for high-frequency long-session work without OAuth quota pressure.

@@ -1,0 +1,54 @@
+# ClawSeat subgroup profile definitions (cf030, cf050)
+# Four hot-pluggable subgroup profiles. Default: dev-minimal.
+#
+# Usage in seed script:
+#   python3 core/scripts/seed_multi_team_minimal.py --profile dev-minimal|dev-standard|test|planner-only ...
+#   # planner-only supports --planner-count N to generate N planner seats (default: 1)
+#
+# All profiles inherit the same workflow invariants (see [invariants]).
+
+[profiles.dev-minimal]
+description = "Development minimal: planner + builder. Planner self-reviews. Best for one focused task or maintenance repair."
+seats = ["planner", "builder"]
+reviewer_required = false
+team_type = "subteam"
+review_model = "planner_owned"
+dedicated_reviewer = false
+scaling_reviewer_gte = 4
+
+[profiles.dev-standard]
+description = "Development standard: planner + 2 builders + reviewer. Disjoint write scopes required. Reviewer gate before closeout."
+seats = ["planner", "builder", "builder", "reviewer"]
+reviewer_required = true
+team_type = "subteam"
+review_model = "dedicated_reviewer"
+dedicated_reviewer = true
+scaling_reviewer_gte = 2
+
+[profiles.test]
+description = "Test group: planner + patrol. QA/evidence campaigns only. No product code edits without explicit profile upgrade."
+seats = ["planner", "patrol"]
+reviewer_required = false
+team_type = "quality-docs"
+review_model = ""
+dedicated_reviewer = false
+
+[profiles.planner-only]
+description = "Planner-only engineering: memory + one or more high-reasoning planners, no builders by default. Planner self-contains diagnosis, planning, implementation, testing, self-review, and closeout. Builder is optional and absent in this profile; operator adds builder seats when execution volume warrants it."
+seats = ["planner"]
+reviewer_required = false
+team_type = "subteam"
+review_model = "planner_owned"
+dedicated_reviewer = false
+dedicated_builder = false
+planner_self_contained = true
+
+[invariants]
+# All profiles share these rules
+validation_branch = "local review/latest"
+push_pr_ci = "opt-in only"
+openclaw_koder_feishu_lark = "optional adapters — not required for normal subgroup creation"
+hotplug = "hot-plug/unplug does not delete task history, briefs, receipts, or memory facts"
+default_profile = "dev-minimal"
+builder_merges_review_latest = false
+memory_owns_main = true

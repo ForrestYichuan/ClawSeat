@@ -31,11 +31,29 @@ class SwitchHooks:
     session_stop_engineer: Callable[[Any], None]
     session_record_cls: type
     normalize_name: Callable[[str], str]
+    engineer_path: Callable[[str], Path] | None = None
+    load_engineer: Callable[[str], Any] | None = None
+    write_engineer: Callable[[Any], None] | None = None
+    create_engineer_profile: Callable[..., Any] | None = None
+    create_session_record: Callable[..., Any] | None = None
 
 
 class SwitchHandlers:
     def __init__(self, hooks: SwitchHooks) -> None:
         self.hooks = hooks
+
+    def _provider_secret_file(self, session: Any) -> Path | None:
+        try:
+            from providers import ProviderError, get_provider
+        except Exception:
+            return None
+        try:
+            provider = get_provider(session.provider, home=self.operator_home())
+        except ProviderError as exc:
+            raise self.hooks.error_cls(str(exc)) from exc
+        if provider is None:
+            return None
+        return Path(provider.secret_file)
 
     def default_launch_args_for_tool(self, tool: str) -> list[str]:
         return list(self.hooks.default_tool_args.get(tool, []))
@@ -54,6 +72,17 @@ class SwitchHandlers:
             )
         if session.tool == "claude" and session.provider == "minimax":
             candidates.append(self.hooks.legacy_secrets_root / "claude" / "minimax.env")
+        if session.tool == "claude" and session.provider == "deepseek":
+            candidates.append(self.hooks.legacy_secrets_root / "claude" / "deepseek.env")
+            candidates.append(
+                operator_home
+                / ".local"
+                / "share"
+                / "agent-launcher"
+                / "secrets"
+                / "claude"
+                / "deepseek.env"
+            )
         if session.tool == "claude" and session.provider == "ark":
             candidates.append(self.hooks.legacy_secrets_root / "claude" / "ark.env")
         if session.tool == "claude" and session.provider == "xcode-best":
@@ -65,23 +94,31 @@ class SwitchHandlers:
         return candidates
 
     def ensure_secret_ready(self, session: Any) -> None:
-        if session.auth_mode not in AUTH_MODES_REQUIRING_SECRET_FILE or not session.secret_file:
+        if session.auth_mode not in AUTH_MODES_REQUIRING_SECRET_FILE:
             return
-        secret_path = Path(session.secret_file)
+        provider_secret_path = self._provider_secret_file(session)
+        secret_path = provider_secret_path or (Path(session.secret_file) if session.secret_file else None)
+        if secret_path is None:
+            return
         if not secret_path.exists() or not secret_path.read_text().strip():
             self.hooks.ensure_dir(secret_path.parent)
+            source_candidates: list[Path] = []
+            if session.secret_file:
+                legacy_secret = Path(session.secret_file)
+                if legacy_secret != secret_path and legacy_secret.exists() and legacy_secret.read_text().strip():
+                    source_candidates.append(legacy_secret)
             for peer in sorted(secret_path.parent.glob("*.env")):
                 if peer == secret_path or not peer.read_text().strip():
                     continue
-                shutil.copy2(peer, secret_path)
-                self.hooks.ensure_secret_permissions(secret_path)
-                break
-        if not secret_path.exists() or not secret_path.read_text().strip():
+                source_candidates.append(peer)
             for shared_secret in self.shared_secret_candidates(session):
                 if not shared_secret.exists() or not shared_secret.read_text().strip():
                     continue
-                self.hooks.ensure_dir(secret_path.parent)
-                shutil.copy2(shared_secret, secret_path)
+                source_candidates.append(shared_secret)
+            for source in source_candidates:
+                if source == secret_path or not source.exists() or not source.read_text().strip():
+                    continue
+                shutil.copy2(source, secret_path)
                 self.hooks.ensure_secret_permissions(secret_path)
                 break
         if not secret_path.exists():
@@ -130,6 +167,22 @@ class SwitchHandlers:
         self.hooks.apply_template(session, self.hooks.load_project(session.project))
         return session
 
+    def _registry_secret_file(self, provider_name: str) -> str:
+        """Return provider registry secret_file for provider_name, or empty string.
+
+        Prefers the registry's flat per-provider path over the generated
+        per-engineer nested path from secret_file_for().  Silently falls back
+        when the registry or provider is unavailable.
+        """
+        try:
+            from providers import get_provider as _gp
+            p = _gp(provider_name, home=self.operator_home())
+            if p is not None and getattr(p, "secret_file", ""):
+                return str(p.secret_file)
+        except Exception:  # noqa: BLE001
+            pass
+        return ""
+
     def build_switched_session(
         self,
         old_session: Any,
@@ -141,11 +194,17 @@ class SwitchHandlers:
     ) -> Any:
         engineer_id = old_session.engineer_id
         identity = self.hooks.identity_name(tool, auth_mode, provider, engineer_id, project.name)
-        secret_file = (
-            str(self.hooks.secret_file_for(tool, provider, engineer_id))
-            if auth_mode in AUTH_MODES_REQUIRING_SECRET_FILE
-            else ""
-        )
+        if auth_mode in AUTH_MODES_REQUIRING_SECRET_FILE:
+            # Prefer the provider registry's flat per-provider secret path so that
+            # seats sharing a provider (e.g. baidu-glm) use the one file that
+            # the operator actually populated.  Fall back to the generated
+            # per-engineer nested path only when the registry has no entry.
+            secret_file = (
+                self._registry_secret_file(provider)
+                or str(self.hooks.secret_file_for(tool, provider, engineer_id))
+            )
+        else:
+            secret_file = ""
         session = self.hooks.session_record_cls(
             engineer_id=engineer_id,
             project=project.name,
@@ -164,6 +223,61 @@ class SwitchHandlers:
             wrapper=old_session.wrapper,
         )
         session._template_model = model.strip()
+        return session
+
+    def create_declared_session_for_switch(self, project: Any, args: Any, model: str = "") -> Any:
+        engineer_id = self.hooks.normalize_name(args.engineer)
+        project_engineers = list(getattr(project, "engineers", []) or [])
+        if project_engineers and engineer_id not in project_engineers:
+            raise self.hooks.error_cls(
+                f"{engineer_id} has no session in project {project.name}; add the seat before switching harness"
+            )
+        required_hooks = {
+            "engineer_path": getattr(self.hooks, "engineer_path", None),
+            "load_engineer": getattr(self.hooks, "load_engineer", None),
+            "write_engineer": getattr(self.hooks, "write_engineer", None),
+            "create_engineer_profile": getattr(self.hooks, "create_engineer_profile", None),
+            "create_session_record": getattr(self.hooks, "create_session_record", None),
+        }
+        missing = [name for name, hook in required_hooks.items() if hook is None]
+        if missing:
+            raise self.hooks.error_cls(
+                f"{engineer_id} has no session in project {project.name}; cannot auto-create session "
+                f"because switch-harness is missing hooks: {', '.join(missing)}"
+            )
+
+        assert self.hooks.engineer_path is not None
+        assert self.hooks.load_engineer is not None
+        assert self.hooks.write_engineer is not None
+        assert self.hooks.create_engineer_profile is not None
+        assert self.hooks.create_session_record is not None
+
+        if self.hooks.engineer_path(engineer_id).exists():
+            self.hooks.load_engineer(engineer_id)
+        else:
+            profile = self.hooks.create_engineer_profile(
+                engineer_id=engineer_id,
+                tool=args.tool,
+                auth_mode=args.mode,
+                provider=args.provider,
+            )
+            self.hooks.write_engineer(profile)
+        monitor_engineers = list(getattr(project, "monitor_engineers", []) or [])
+        monitor = True if not monitor_engineers else engineer_id in monitor_engineers
+        session = self.hooks.create_session_record(
+            engineer_id=engineer_id,
+            project=project,
+            tool=args.tool,
+            auth_mode=args.mode,
+            provider=args.provider,
+            monitor=monitor,
+        )
+        session._template_model = model.strip()
+        self.ensure_secret_ready(session)
+        self.hooks.write_session(session)
+        self.hooks.apply_template(session, project)
+        self.hooks.ensure_dir(Path(session.runtime_dir))
+        print(f"created session for declared seat {engineer_id} in {project.name}: {session.session}")
         return session
 
     def session_switch_harness(self, args: Any) -> int:
@@ -190,7 +304,22 @@ class SwitchHandlers:
             context=f"session switch-harness {args.engineer}",
         )
         project = self.hooks.load_project_or_current(args.project)
-        old_session = self.hooks.load_session(project.name, self.hooks.normalize_name(args.engineer))
+        try:
+            old_session = self.hooks.load_session(project.name, self.hooks.normalize_name(args.engineer))
+        except FileNotFoundError:
+            self.create_declared_session_for_switch(project, args, requested_model)
+            try:
+                from seat_harness_memory import save_last_harness
+                save_last_harness(
+                    self.hooks.normalize_name(args.engineer),
+                    args.tool,
+                    args.mode,
+                    args.provider,
+                    model=requested_model,
+                )
+            except Exception as exc:  # pragma: no cover - sidecar cache only.
+                print(f"warn: save_last_harness for {args.engineer}: {exc}", file=sys.stderr)
+            return 0
         new_session = self.build_switched_session(
             old_session,
             project,

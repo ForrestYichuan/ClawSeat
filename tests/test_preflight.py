@@ -117,6 +117,40 @@ def test_preflight_bootstrap_skips_runtime_only_paths(monkeypatch, tmp_path):
     assert "lark-cli" in names
 
 
+def test_preflight_bootstrap_no_window_skips_native_window_checks(monkeypatch, tmp_path):
+    monkeypatch.setattr(pf, "_check_clawseat_root", _passthrough_check("CLAWSEAT_ROOT"))
+    monkeypatch.setattr(pf, "_check_python", _passthrough_check("python3"))
+    monkeypatch.setattr(pf, "_check_tomllib", _passthrough_check("tomllib"))
+    monkeypatch.setattr(
+        pf,
+        "_check_tmux",
+        lambda: (_item("tmux"), _item("tmux_server")),
+    )
+    monkeypatch.setattr(pf, "_resolve_clawseat_root_from_env", lambda: tmp_path)
+    monkeypatch.setattr(pf, "_check_repo_integrity", lambda root: _item("repo_integrity"))
+    monkeypatch.setattr(pf, "_check_iterm2", lambda: pytest.fail("--no-window should skip iTerm2 app check"))
+    monkeypatch.setattr(
+        pf,
+        "_check_iterm2_python_module",
+        lambda: pytest.fail("--no-window should skip iTerm2 Python module check"),
+    )
+    monkeypatch.setattr(pf, "_check_claude_required", _passthrough_check("claude_required"))
+    monkeypatch.setattr(
+        pf,
+        "_check_optional_cli",
+        lambda binary, label, install_hint: _item(binary),
+    )
+
+    result = pf.preflight_check("demo", phase="bootstrap", skip_native_windows=True)
+
+    by_name = {item.name: item for item in result.items}
+    assert by_name["iterm2"].status == pf.PreflightStatus.PASS
+    assert by_name["iterm2"].message == "native iTerm window checks skipped (--no-window)"
+    assert by_name["iterm2_python"].status == pf.PreflightStatus.PASS
+    assert by_name["iterm2_python"].message == "iTerm2 Python module check skipped (--no-window)"
+    assert "claude_required" in by_name
+
+
 def test_preflight_rejects_invalid_phase(monkeypatch):
     with pytest.raises(ValueError, match="unsupported preflight phase"):
         pf.preflight_check("demo", phase="invalid")
@@ -211,12 +245,25 @@ def test_main_returns_nonzero_when_hard_blocked(monkeypatch, capsys):
         items=[_item("blocked", pf.PreflightStatus.HARD_BLOCKED, "boom")],
         hard_blocked_items=[_item("blocked", pf.PreflightStatus.HARD_BLOCKED, "boom")],
     )
-    monkeypatch.setattr(pf, "preflight_check", lambda project, phase="runtime": result)
-    monkeypatch.setattr(sys, "argv", ["preflight.py", "--project", "demo", "--phase", "bootstrap"])
+    observed: dict[str, object] = {}
+
+    def _fake_preflight(project, phase="runtime", *, skip_native_windows=False):
+        observed["project"] = project
+        observed["phase"] = phase
+        observed["skip_native_windows"] = skip_native_windows
+        return result
+
+    monkeypatch.setattr(pf, "preflight_check", _fake_preflight)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["preflight.py", "--project", "demo", "--phase", "bootstrap", "--no-window"],
+    )
 
     rc = pf.main()
     out = capsys.readouterr().out
 
     assert rc == 2
+    assert observed == {"project": "demo", "phase": "bootstrap", "skip_native_windows": True}
     assert "preflight_check: FAIL [demo]" in out
     assert "[✗] blocked: boom" in out

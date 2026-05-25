@@ -1,0 +1,28 @@
+---
+template_name: builder@claude
+role: builder
+tool: claude
+provider: anthropic
+auth_mode: oauth_token
+default_model: claude-sonnet-4-6
+cost_class: medium-high
+default_skills:
+  - builder
+  - gstack-harness
+boot_command: "claude --workspace {workspace}"
+session_kind: tmux
+capabilities:
+  - code-write
+  - test-write
+  - data-yaml-write
+escalation_rule: "task brief complexity=high triggers planner sub-spawn Opus"
+---
+
+# Builder seat (Claude Sonnet)
+
+Implementation specialist. Reads workflow.md step assigned to its role,
+writes code / tests / data per skill_commands, drops artifacts under
+team workspace, writes DELIVERY.md, notifies planner.
+
+Sonnet 4.6 default for game UX feel (per 2026 horizontal benchmark, spec
+§6.4). Complex tasks (DSL, multi-file refactor) sub-spawn Opus on demand.

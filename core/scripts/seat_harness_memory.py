@@ -13,7 +13,11 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _CORE_LIB = str(_REPO_ROOT / "core" / "lib")
 if _CORE_LIB not in sys.path:
     sys.path.insert(0, _CORE_LIB)
+_CORE_SCRIPTS = str(_REPO_ROOT / "core" / "scripts")
+if _CORE_SCRIPTS not in sys.path:
+    sys.path.insert(0, _CORE_SCRIPTS)
 from real_home import real_user_home  # noqa: E402
+from _toml_compat import loads_safe as _toml_loads_safe  # noqa: E402
 
 _FILENAME = "last-harness.toml"
 
@@ -32,14 +36,7 @@ def load_last_harness(seat_id: str, home: Path | None = None) -> dict[str, str] 
     if not path.exists():
         return None
     try:
-        if sys.version_info >= (3, 11):
-            import tomllib
-        else:
-            try:
-                import tomllib  # type: ignore[no-redef]
-            except ImportError:
-                import tomli as tomllib  # type: ignore[no-redef]
-        data = tomllib.loads(path.read_text(encoding="utf-8"))
+        data = _toml_loads_safe(path.read_text(encoding="utf-8"))
     except Exception:
         return None
     if not isinstance(data, dict):

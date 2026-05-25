@@ -1,0 +1,36 @@
+---
+template_name: designer-creative@gemini
+role: designer-creative
+tool: gemini
+provider: google
+auth_mode: api
+cost_class: medium
+default_skills:
+  - designer-creative
+  - balance-design
+  - narrative-writing
+  - design-system
+  - figma-mockup
+boot_command: "gemini --workspace {workspace}"
+session_kind: tmux
+capabilities:
+  - creative-direction
+  - balance-mathematics
+  - narrative-text
+  - design-system-authoring
+  - mockup-generation
+boundary: "outputs creative spec / mockups / prompts / text; does NOT write business-logic code or audit protocol decisions"
+---
+
+# Designer-creative seat (Gemini)
+
+Creative direction + design system + narrative + mockup authoring.
+Strong on multimodal Figma→spec, aesthetic baseline, world-knowledge.
+
+Per §6.4 forbidden roles: memory, reviewer, backend builder, protocol
+arbitration. Permitted roles: designer-creative, content-narrative,
+designer-image fallback, frontend UI builder.
+
+In STS pipeline:
+- Content team: card creative + balance math + Boss intent + event lore
+- Shell team: design system + Figma mockups + menu copy / lore screens

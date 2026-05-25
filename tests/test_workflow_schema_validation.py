@@ -29,6 +29,7 @@ def test_workflow_schema_has_required_fields() -> None:
         "subagent_count",
         "per_subagent_inner_parallel",
         "context_per_subagent",
+        "product_acceptance_required",
         "skill_commands",
         "artifacts",
         "notify_on_done",

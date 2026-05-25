@@ -11,10 +11,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-try:
-    import tomllib
-except ImportError:  # pragma: no cover
-    import tomli as tomllib  # type: ignore[no-redef]
+from _toml_compat import loads_safe as _toml_loads_safe
 
 from agent_admin_config import HOME, REPO_ROOT, SEND_AND_VERIFY_SH, validate_runtime_combo
 
@@ -347,7 +344,7 @@ def caller_engineer_profile(env: Mapping[str, str] | None = None) -> dict[str, A
     if path is None or not path.is_file():
         return None
     try:
-        return tomllib.loads(path.read_text(encoding="utf-8"))
+        return _toml_loads_safe(path.read_text(encoding="utf-8"))
     except Exception:
         return None
 

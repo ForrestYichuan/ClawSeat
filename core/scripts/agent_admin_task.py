@@ -102,12 +102,25 @@ def create_task(args: Any) -> int:
     project = str(args.project)
     if not _task_id_ok(task_id):
         raise TaskCommandError(f"invalid task_id: {task_id}")
+    # v3 spec §10 item 2: brief-driven workflow template is deprecated for v3
+    # multi-team projects. v3 callers should use `agent_admin brief queue`
+    # which appends a task_created event + writes a schema-valid brief.
+    # Non-breaking: v2 single-team callers still work, just see a warning.
+    tmpl = str(getattr(args, "workflow_template", "") or "").strip()
+    if tmpl in {"brief-driven", "brief_driven"}:
+        import sys
+        print(
+            f"warn: 'agent_admin task create --workflow-template {tmpl}' is deprecated "
+            "for v3 projects; use 'agent_admin brief queue --project ... --team ... "
+            "--task-id ... --objective ...' instead (spec §4.2-§4.3).",
+            file=sys.stderr,
+        )
     root = task_dir(project, task_id)
     root.mkdir(parents=True, exist_ok=True)
     workflow = root / "workflow.md"
     status = root / "STATUS.md"
     if not workflow.exists():
-        workflow.write_text(_workflow_template(task_id, str(getattr(args, "workflow_template", "") or "")), encoding="utf-8")
+        workflow.write_text(_workflow_template(task_id, tmpl), encoding="utf-8")
     if not status.exists():
         status.write_text(_status_template(task_id), encoding="utf-8")
     else:

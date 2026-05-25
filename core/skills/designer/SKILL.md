@@ -16,4 +16,4 @@ See [core/references/workflow-collaboration-protocol.md](../../references/workfl
 See [core/references/handoff-receipt-protocol.md](../../references/handoff-receipt-protocol.md) — two steps required: `complete_handoff.py` (durable receipt) then `send-and-verify.sh` (wakeup). Neither substitutes for the other. 完成必须两步，不可二选一; send-and-verify cannot substitute; complete_handoff.py 失败要 escalate 给 reply_to + memory.
 ## Context Management
 See [core/references/context-management-protocol.md](../../references/context-management-protocol.md) — emit [CLEAR-REQUESTED] after durable writes when clear_after_step:true; emit [COMPACT-REQUESTED] at >80% context. Exactly one marker as final line.
-## Borrowed Practices / Operator Language Matching: see [`core/references/superpowers-borrowed/`](../../references/superpowers-borrowed/); match last 3 operator messages; keep technical terms, commands, and paths literal.
+## Operator Language Matching: match last 3 operator messages; keep technical terms, commands, paths, and artifact IDs literal.

@@ -2,6 +2,22 @@
 
 All specialist seats follow this 7-step loop when executing workflow.md steps.
 
+## Queue Wake Hook
+
+In v3 brief mode, `agent_admin brief queue` is the canonical dispatch entry.
+After it durably appends `task_created` and writes the brief, it runs a minimal
+post-append hook unless `--no-wake` is passed:
+
+```text
+task_created -> wake that team's planner
+```
+
+The hook only sends a short `[QUEUE-WAKE] <project>/<team> <task_id>` message.
+It does not claim tasks, read briefs, inspect workflow steps, wake builders, or
+notify memory. If the hook prints `HOOK_WAKE_FAILED`, the task is already
+durable but the planner was not notified; the caller must surface the block
+instead of silently stopping.
+
 ## 7-Step Loop
 
 On receiving a `send-and-verify` notification:

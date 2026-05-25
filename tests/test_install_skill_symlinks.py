@@ -4,6 +4,8 @@ import os
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 _SETUP_HELPERS = Path(__file__).with_name("test_install_privacy_setup.py")
 _setup_spec = importlib.util.spec_from_file_location("_h3_install_privacy_setup", _SETUP_HELPERS)
 assert _setup_spec is not None
@@ -29,10 +31,16 @@ def _assert_tool_mirrors_agents(home: Path, tool: str, skills: tuple[str, ...]) 
         assert os.readlink(link) == str(home / ".agents" / "skills" / skill)
 
 
-def test_install_creates_new_skill_symlinks(tmp_path: Path) -> None:
-    root, home, py_stubs = _prepare_h3_fake_root(tmp_path)
+@pytest.fixture(scope="module")
+def default_skill_install(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
+    root, home, py_stubs = _prepare_h3_fake_root(tmp_path_factory.mktemp("h3skills-default"))
     result = _run_install(root, home, py_stubs, project="h3skills")
     assert result.returncode == 0, result.stderr
+    return root, home
+
+
+def test_install_creates_new_skill_symlinks(default_skill_install: tuple[Path, Path]) -> None:
+    root, home = default_skill_install
 
     core_skills = ("clawseat-memory", "clawseat-decision-escalation")
     extended_skills = ("clawseat-koder", "clawseat-privacy", "clawseat-memory-reporting")
@@ -73,11 +81,10 @@ def test_install_leaves_existing_clawseat_memory_symlink(tmp_path: Path) -> None
     assert not (home / ".gemini" / "skills" / "clawseat-memory").exists()
 
 
-def test_install_creates_codex_skill_dir_but_skips_gemini_symlinks(tmp_path: Path) -> None:
-    root, home, py_stubs = _prepare_h3_fake_root(tmp_path)
-    result = _run_install(root, home, py_stubs, project="h3multi")
-    assert result.returncode == 0, result.stderr
-
+def test_install_creates_codex_skill_dir_but_skips_gemini_symlinks(
+    default_skill_install: tuple[Path, Path],
+) -> None:
+    _root, home = default_skill_install
     skills_home = home / ".codex" / "skills"
     assert skills_home.is_dir()
     assert (skills_home / "clawseat-memory").is_symlink()

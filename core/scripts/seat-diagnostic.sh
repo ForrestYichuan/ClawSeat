@@ -27,11 +27,12 @@ SESSION_NAME=""
 TOOL=""
 AUTH_MODE=""
 PROVIDER=""
+PROVIDER_FAMILY=""
 RUNTIME_DIR=""
 SECRET_FILE=""
 
 metadata="$(
-  python3 - "$AGENTS_ROOT" "$PROJECT" "$SEAT" <<'PY'
+  python3 - "$AGENTS_ROOT" "$PROJECT" "$SEAT" "$REPO_ROOT" <<'PY'
 from __future__ import annotations
 
 import shlex
@@ -46,6 +47,9 @@ except ModuleNotFoundError:  # pragma: no cover
 agents_root = Path(sys.argv[1]).expanduser()
 project = sys.argv[2]
 seat = sys.argv[3]
+# argv[4] is the shell-computed REPO_ROOT; use it directly so the inline
+# Python block does not need __file__ (which is undefined in a heredoc).
+repo_root = Path(sys.argv[4]) if len(sys.argv) > 4 and sys.argv[4] else agents_root.parent.parent
 
 
 def load(path: Path) -> dict:
@@ -75,11 +79,30 @@ override = seat_overrides.get(seat, {}) if isinstance(seat_overrides, dict) else
 if not isinstance(override, dict):
     override = {}
 
+provider_name = (
+    session.get("provider") or override.get("provider") or last_harness.get("provider") or ""
+)
+
+# Resolve provider family from the local provider registry so required_keys()
+# can match by family (e.g. baidu-glm has family=minimax) rather than by
+# provider name alone.  Fails silently so the diagnostic still works offline.
+provider_family = ""
+try:
+    lib_path = str(repo_root / "core" / "lib")
+    if lib_path not in sys.path:
+        sys.path.insert(0, lib_path)
+    from providers import get_provider  # type: ignore[import]
+    p = get_provider(provider_name)
+    provider_family = str(getattr(p, "family", "") or "") if p else ""
+except Exception:
+    pass
+
 fields = {
     "SESSION_NAME": session.get("session") or override.get("session_name") or "",
     "TOOL": session.get("tool") or override.get("tool") or last_harness.get("tool") or "",
     "AUTH_MODE": session.get("auth_mode") or override.get("auth_mode") or last_harness.get("auth_mode") or "",
-    "PROVIDER": session.get("provider") or override.get("provider") or last_harness.get("provider") or "",
+    "PROVIDER": provider_name,
+    "PROVIDER_FAMILY": provider_family,
     "RUNTIME_DIR": session.get("runtime_dir") or "",
     "SECRET_FILE": session.get("secret_file") or "",
 }
@@ -224,12 +247,17 @@ endpoint_key() {
 }
 
 required_keys() {
-  case "$TOOL:$AUTH_MODE:$PROVIDER" in
-    codex:api:*) printf 'OPENAI_API_KEY\n' ;;
-    claude:api:minimax) printf 'ANTHROPIC_AUTH_TOKEN\n' ;;
-    claude:api:ark) printf 'ARK_API_KEY\n' ;;
-    claude:api:*) printf 'ANTHROPIC_API_KEY\n' ;;
-    gemini:api:*) printf 'GEMINI_API_KEY GOOGLE_API_KEY\n' ;;
+  # Match on PROVIDER_FAMILY first (populated from registry) so that providers
+  # registered with family=minimax (e.g. baidu-glm / Qianfan) accept
+  # ANTHROPIC_AUTH_TOKEN even when their provider name is not "minimax".
+  case "$TOOL:$AUTH_MODE:${PROVIDER_FAMILY}:$PROVIDER" in
+    codex:api:*:*)            printf 'OPENAI_API_KEY\n' ;;
+    claude:api:minimax:*)     printf 'ANTHROPIC_AUTH_TOKEN\n' ;;
+    claude:api:*:minimax)     printf 'ANTHROPIC_AUTH_TOKEN\n' ;;
+    claude:api:ark:*)         printf 'ARK_API_KEY\n' ;;
+    claude:api:*:ark)         printf 'ARK_API_KEY\n' ;;
+    claude:api:*:*)           printf 'ANTHROPIC_API_KEY\n' ;;
+    gemini:api:*:*)           printf 'GEMINI_API_KEY GOOGLE_API_KEY\n' ;;
     *) printf '\n' ;;
   esac
 }
@@ -284,6 +312,13 @@ print_tmux_block() {
     printf 'tmux = <not found>\n\n'
     return
   fi
+
+  # Unset TMUX / TMUX_PANE so all tmux calls below use the default server socket,
+  # not the socket inherited from the calling Claude Code or tmux pane.
+  # This mirrors send-and-verify.sh's "env -u TMUX" pattern and is the root
+  # cause of "session_alive = no" when the diagnostic is run from inside a
+  # planner pane whose TMUX env points to a different socket than the launcher.
+  unset TMUX TMUX_PANE
 
   local err clients capture rc
   err="$(mktemp)"

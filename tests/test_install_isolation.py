@@ -65,6 +65,10 @@ def _fake_install_root(tmp_path: Path) -> tuple[Path, Path, Path, Path, Path]:
         root / "core" / "scripts" / "projects_registry.py",
     )
     shutil.copy2(
+        _REPO / "core" / "scripts" / "_toml_compat.py",
+        root / "core" / "scripts" / "_toml_compat.py",
+    )
+    shutil.copy2(
         _REPO / "core" / "scripts" / "reconcile_seat_states.py",
         root / "core" / "scripts" / "reconcile_seat_states.py",
     )
@@ -81,6 +85,14 @@ def _fake_install_root(tmp_path: Path) -> tuple[Path, Path, Path, Path, Path]:
     shutil.copy2(
         _REPO / "core" / "lib" / "real_home.py",
         root / "core" / "lib" / "real_home.py",
+    )
+    shutil.copy2(
+        _REPO / "core" / "lib" / "state.py",
+        root / "core" / "lib" / "state.py",
+    )
+    shutil.copy2(
+        _REPO / "core" / "lib" / "utils.py",
+        root / "core" / "lib" / "utils.py",
     )
     shutil.copy2(
         _REPO / "core" / "shell-scripts" / "send-and-verify.sh",

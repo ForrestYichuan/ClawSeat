@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "clawseat://schemas/project_toml_v3.schema.json",
+  "title": "ClawSeat project.toml v3",
+  "description": "Schema for ClawSeat v3 multi-team project.toml. Backward-compatible with v2 flat seat layout; adds [mode] and [teams] metadata.",
+  "type": "object",
+  "required": ["project_name", "seats", "seat_roles"],
+  "properties": {
+    "project_name": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "repo_root": {
+      "type": "string"
+    },
+    "mode": {
+      "type": "object",
+      "description": "v3 team structure declaration. Absent → defaults to single.",
+      "properties": {
+        "team_structure": {
+          "type": "string",
+          "enum": ["single", "multi"]
+        },
+        "project_memory": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "description": "The single project-level memory seat. It is outside subteams."
+        }
+      },
+      "required": ["team_structure"]
+    },
+    "teams": {
+      "type": "object",
+      "description": "v3 multi-mode metadata. Only required when mode.team_structure = multi.",
+      "patternProperties": {
+        "^[a-z0-9][a-z0-9-]*$": {
+          "type": "object",
+          "required": ["seats"],
+          "properties": {
+            "seats": {
+              "type": "array",
+              "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+              "minItems": 1
+            },
+            "team_type": {
+              "type": "string",
+              "enum": ["subteam", "quality-docs"],
+              "description": "Template-level team kind. Project memory is not a subteam seat."
+            },
+            "planner_mode": {
+              "type": "string",
+              "enum": ["delivery", "quality_campaign"],
+              "description": "Planner operating loop. delivery planners own dev workflow; quality_campaign planners own continuous QA campaigns."
+            },
+            "notify_policy": {
+              "type": "string",
+              "enum": ["queue_drained_only", "never_notify_memory"],
+              "description": "Whether planner wakes memory per task or only at a terminal queue/gate condition."
+            },
+            "quality_gate_doc": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Project-relative quality gate document, normally quality-docs/QUALITY.md."
+            },
+            "ownership_paths": {
+              "type": "array",
+              "items": {"type": "string"},
+              "description": "Path globs this team owns; planners use this for module-boundary routing."
+            },
+            "scaling_policy": {
+              "type": "object",
+              "description": "Subteam builder/reviewer scaling gate.",
+              "properties": {
+                "max_builders": {"type": "integer", "const": 3},
+                "reviewer_required_when_builders_gte": {"type": "integer", "const": 2},
+                "overflow_action": {"type": "string", "const": "propose_new_subteam"},
+                "reviewer_fallback": {"type": "string", "const": "planner"}
+              },
+              "additionalProperties": false
+            },
+            "review_model": {
+              "type": "string",
+              "enum": ["dedicated_reviewer", "planner_owned"],
+              "description": "Acceptance review topology. planner_owned is only for lightweight one-builder subteams."
+            },
+            "dedicated_reviewer": {
+              "type": "boolean",
+              "description": "False means the subteam planner owns review for a lightweight one-builder team."
+            },
+            "autonomous": {
+              "type": "boolean",
+              "description": "Team owns an autonomous work loop instead of only memory-queued briefs."
+            },
+            "loop": {
+              "type": "string",
+              "description": "Autonomous loop mode, e.g. continuous."
+            },
+            "stop_rule": {
+              "type": "string",
+              "description": "Autonomous campaign stop rule, e.g. campaign_clean_streak_3."
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {"dedicated_reviewer": {"const": false}},
+                "required": ["dedicated_reviewer"]
+              },
+              "then": {
+                "properties": {"review_model": {"const": "planner_owned"}},
+                "required": ["review_model"]
+              }
+            },
+            {
+              "if": {
+                "properties": {"review_model": {"const": "planner_owned"}},
+                "required": ["review_model"]
+              },
+              "then": {
+                "properties": {"dedicated_reviewer": {"const": false}},
+                "required": ["dedicated_reviewer"]
+              }
+            },
+            {
+              "if": {
+                "properties": {"team_type": {"const": "subteam"}},
+                "required": ["team_type"]
+              },
+              "then": {
+                "properties": {
+                  "planner_mode": {"const": "delivery"},
+                  "notify_policy": {"const": "queue_drained_only"}
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {"team_type": {"const": "quality-docs"}},
+                "required": ["team_type"]
+              },
+              "then": {
+                "properties": {
+                  "planner_mode": {"const": "quality_campaign"},
+                  "notify_policy": {"const": "never_notify_memory"}
+                }
+              }
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "seats": {
+      "type": "array",
+      "description": "Flat seat id list. v3 multi mode names them <team>-<role>[-<variant>].",
+      "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+      "minItems": 1,
+      "uniqueItems": true
+    },
+    "seat_roles": {
+      "type": "object",
+      "description": "Flat seat_id -> role string. Must cover every entry in seats.",
+      "patternProperties": {
+        "^[a-z0-9][a-z0-9-]*$": {"type": "string"}
+      },
+      "additionalProperties": false
+    },
+    "seat_overrides": {
+      "type": "object",
+      "description": "Per-seat tool/provider/auth overrides. Flat keys = seat_id.",
+      "patternProperties": {
+        "^[a-z0-9][a-z0-9-]*$": {
+          "type": "object",
+          "properties": {
+            "tool": {"$ref": "#/$defs/tool_enum"},
+            "provider": {"$ref": "#/$defs/provider_enum"},
+            "auth_mode": {"$ref": "#/$defs/auth_mode_enum"},
+            "model": {"type": "string", "description": "Concrete model id from approved config (e.g. claude-opus-4-7, claude-sonnet-4-6)."},
+            "instance": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$", "description": "Optional role instance suffix from approved config, used for multiple seats with the same role in one team."},
+            "capabilities": {
+              "type": "array",
+              "items": {"type": "string"}
+            },
+            "purpose": {"type": "string"},
+            "parallel_instances": {"type": "integer", "minimum": 1, "maximum": 10}
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"mode": {"properties": {"team_structure": {"const": "multi"}}}},
+        "required": ["mode"]
+      },
+      "then": {
+        "required": ["teams"],
+        "description": "multi mode requires [teams] metadata"
+      }
+    }
+  ],
+  "$defs": {
+    "tool_enum": {
+      "type": "string",
+      "enum": ["claude", "codex", "gemini"]
+    },
+    "provider_enum": {
+      "type": "string",
+      "enum": ["anthropic", "openai", "google", "minimax"]
+    },
+    "auth_mode_enum": {
+      "type": "string",
+      "enum": ["oauth", "oauth_token", "api"]
+    }
+  }
+}

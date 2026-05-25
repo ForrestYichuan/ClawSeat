@@ -9,11 +9,27 @@ SHARED_SKILLS: Final[tuple[str, ...]] = (
     "gstack-harness",
     "tmux-basics",
 )
+ROLE_SKILL_ALIASES: Final[dict[str, str]] = {
+    "planner-dispatcher": "planner",
+    "project-memory": "memory-oracle",
+    "memory-oracle": "memory-oracle",
+    "solo-tui": "solo-tui",
+    "user-proxy": "solo-tui",
+    "spec-owner": "solo-tui",
+    "product-tester": "solo-tui",
+    "root-cause-scout": "solo-tui",
+    "warden": "solo-tui",
+    "qa": "patrol",
+    "code-reviewer": "reviewer",
+    "frontstage-supervisor": "clawseat-koder",
+}
 SEAT_SKILL_MAP: Final[dict[str, str]] = {
     # engineering / solo template seats (gstack-bound)
     "ancestor": "clawseat-ancestor",
     "planner": "planner",
     "memory": "memory-oracle",
+    "solo": "solo-tui",
+    "warden": "solo-tui",
     "builder": "builder",
     "reviewer": "reviewer",
     "patrol": "patrol",
@@ -33,15 +49,41 @@ def seat_skill_key(seat_id: str) -> str:
         return ""
     if normalized in SEAT_SKILL_MAP:
         return normalized
-    return normalized.split("-", 1)[0]
+    if normalized in ROLE_SKILL_ALIASES:
+        return normalized
+    for creative_prefix in ("builder-image-", "builder-av-"):
+        if normalized.startswith(creative_prefix):
+            return creative_prefix.rstrip("-")
+    first = normalized.split("-", 1)[0]
+    if first in SEAT_SKILL_MAP or first in ROLE_SKILL_ALIASES:
+        return first
+    for token in normalized.split("-"):
+        if token in SEAT_SKILL_MAP or token in ROLE_SKILL_ALIASES:
+            return token
+    return first
 
 
 def role_skill_for_seat(seat_id: str) -> str:
-    return SEAT_SKILL_MAP.get(seat_skill_key(seat_id), DEFAULT_ROLE_SKILL)
+    key = seat_skill_key(seat_id)
+    if key in ROLE_SKILL_ALIASES:
+        return ROLE_SKILL_ALIASES[key]
+    return SEAT_SKILL_MAP.get(key, DEFAULT_ROLE_SKILL)
 
 
-def skill_names_for_seat(seat_id: str) -> list[str]:
-    ordered = [role_skill_for_seat(seat_id), *SHARED_SKILLS]
+def role_skill_for_hint(role_hint: str | None) -> str | None:
+    if not role_hint:
+        return None
+    key = seat_skill_key(role_hint)
+    if key in ROLE_SKILL_ALIASES:
+        return ROLE_SKILL_ALIASES[key]
+    if key in SEAT_SKILL_MAP:
+        return SEAT_SKILL_MAP[key]
+    return None
+
+
+def skill_names_for_seat(seat_id: str, role_hint: str | None = None) -> list[str]:
+    role_skill = role_skill_for_hint(role_hint) or role_skill_for_seat(seat_id)
+    ordered = [role_skill, *SHARED_SKILLS]
     seen: set[str] = set()
     result: list[str] = []
     for item in ordered:

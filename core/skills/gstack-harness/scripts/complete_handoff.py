@@ -12,6 +12,11 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - Python < 3.11
+    import tomli as tomllib  # type: ignore
+
 # Add core/lib to path so seat_resolver can be imported
 _scripts_dir = Path(__file__).parent.resolve()
 _core_lib = _scripts_dir.parent.parent.parent / "lib"
@@ -45,6 +50,11 @@ from _common import (
 )
 
 from seat_resolver import resolve_seat_from_profile
+from queue_io import (  # noqa: E402
+    QueueError as V3QueueError,
+    append_event as append_v3_queue_event,
+    read_current_state as read_v3_current_state,
+)
 
 
 def _do_prune(text: str, task_id: str) -> str:
@@ -512,6 +522,99 @@ def complete_source_queue_if_possible(
         return primary
 
 
+def _v3_team_for_seat(profile: object, seat: str) -> str | None:
+    """Return the v3 team that owns a seat, if the profile declares one."""
+    profile_path = getattr(profile, "profile_path", None)
+    if profile_path is None:
+        return None
+    try:
+        data = tomllib.loads(Path(profile_path).read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - best-effort compatibility path
+        return None
+    teams = data.get("teams")
+    if not isinstance(teams, dict):
+        return None
+    for team_name, team_cfg in teams.items():
+        if not isinstance(team_cfg, dict):
+            continue
+        seats = [str(item) for item in (team_cfg.get("seats") or [])]
+        if seat in seats:
+            return str(team_name)
+    return None
+
+
+def _v3_queue_actor_for_seat(profile: object, seat: str) -> str:
+    overrides = getattr(profile, "seat_overrides", {}) or {}
+    override = overrides.get(seat) or {} if isinstance(overrides, dict) else {}
+    tool = str(override.get("tool") or "").strip().lower()
+    if tool in {"claude", "codex", "gemini"}:
+        return f"planner@{tool}"
+    return "operator"
+
+
+def complete_v3_brief_queue_if_possible(
+    profile: object,
+    *,
+    seat: str,
+    task_id: str,
+    status: str,
+    verdict: str | None,
+    summary: str,
+) -> Path | None:
+    """Mirror a planner completion receipt into its v3 team queue when possible.
+
+    Some seats still close out by calling complete_handoff.py directly. That is
+    a valid durable receipt, but without this bridge planner-status keeps
+    showing task_claimed. This only appends missing state-machine events for the
+    seat's own v3 team queue; it never creates tasks or changes another team.
+    """
+    if str(status or "").strip() != "completed":
+        return None
+    success_verdicts = {"PASS", "APPROVED", "INVESTIGATED", "DONE", "COMPLETED"}
+    if verdict and str(verdict).strip().upper() not in success_verdicts:
+        return None
+
+    team = _v3_team_for_seat(profile, seat)
+    if not team:
+        return None
+    tasks_root = getattr(profile, "tasks_root", None)
+    if tasks_root is None:
+        return None
+    queue = Path(tasks_root) / team / "tasks.queue.jsonl"
+    if not queue.exists():
+        return None
+
+    state = read_v3_current_state(queue)
+    ts = state.get(task_id)
+    if ts is None:
+        return None
+    if ts.status == "task_done":
+        return queue
+
+    if ts.status in ("task_created", "task_waiting_for", "task_reset"):
+        plan = ["task_claimed", "task_in_progress", "task_done"]
+    elif ts.status == "task_claimed":
+        plan = ["task_in_progress", "task_done"]
+    elif ts.status == "task_in_progress":
+        plan = ["task_done"]
+    else:
+        return None
+
+    actor = _v3_queue_actor_for_seat(profile, seat)
+    for event_type in plan:
+        event = {
+            "event_type": event_type,
+            "actor": actor,
+            "task_id": task_id,
+        }
+        if event_type == "task_done":
+            event["verdict"] = "PASS"
+            if summary:
+                event["summary"] = summary
+        append_v3_queue_event(queue, event)
+    return queue
+
+
 def build_frontstage_objective(
     *,
     source: str,
@@ -891,10 +994,105 @@ def _validate_completion_receipt(
 
     actual_base = receipt.get("branch_base")
     if actual_base != expected_base:
-        raise SystemExit(
-            "branch_base mismatch: receipt base does not match dispatch expected_base_sha."
-            " Rebase the feature branch onto the current main and retry."
+        # v3 spec §10 item 6 (post-DO): soft-fail instead of SystemExit so the
+        # canonical receipt path keeps flowing during base drift. The
+        # `_annotate_lineage_status` step earlier records lineage_status; here
+        # we ensure it reflects divergence even if upstream missed it.
+        # Downstream consumers (memory) recover via the PASS_NEEDS_INTEGRATION
+        # three-lane handler (spec §C / DO spec). Hard-failing here previously
+        # blocked planner→memory fan-in (AL-503 finding).
+        print(
+            "warn: branch_base mismatch — "
+            f"receipt={actual_base!r} vs dispatch expected_base_sha={expected_base!r}; "
+            f"lineage_status={receipt.get('lineage_status', '?')!r}; "
+            "receipt still emitted, memory PASS_NEEDS_INTEGRATION handler decides recovery",
+            file=sys.stderr,
         )
+        if receipt.get("lineage_status") != "divergent":
+            receipt["lineage_status"] = "divergent"
+            receipt["head_contains_commit"] = False
+
+
+_GENERIC_PLANNER_SOURCES = frozenset({"planner", "planner-dispatcher"})
+_PLANNER_ROLES_FOR_GUARD = frozenset({"planner", "planner-dispatcher"})
+
+
+def _resolve_generic_planner_source(profile: object, source: str) -> str:
+    """Normalize or reject a generic planner source in multi-team projects.
+
+    Called before any receipt I/O so the generic-source problem is caught
+    early with a clear diagnostic rather than producing ambiguous receipt paths
+    like <task_id>__planner__memory.json.
+
+    Behaviour:
+    - source is not generic planner → return unchanged (exact planner source passes through).
+    - exactly one non-generic planner seat found in seat_roles → normalize
+      to that exact planner seat with an info message.
+    - multiple non-generic planner seats → raise SystemExit with list of
+      exact planner seats; manual caller must pick the right one.
+    - zero non-generic planner seats (legacy single-team profile where the
+      seat is literally named 'planner') → return unchanged; existing
+      self-closeout guard handles the legacy case.
+    """
+    if source not in _GENERIC_PLANNER_SOURCES:
+        return source
+
+    seat_roles: dict[str, str] = getattr(profile, "seat_roles", {}) or {}
+    exact_planner_seats = [
+        seat for seat, role in seat_roles.items()
+        if role in _PLANNER_ROLES_FOR_GUARD and seat not in _GENERIC_PLANNER_SOURCES
+    ]
+
+    if not exact_planner_seats:
+        # Legacy single-team: seat is literally named "planner". Return unchanged.
+        return source
+
+    if len(exact_planner_seats) == 1:
+        exact = exact_planner_seats[0]
+        print(
+            f"info: normalized generic --source {source!r} to exact planner seat {exact!r}",
+            file=sys.stderr,
+        )
+        return exact
+
+    # Multiple exact planner seats: ambiguous in multi-team project.
+    seats_list = ", ".join(sorted(exact_planner_seats))
+    project = getattr(profile, "project_name", "?")
+    raise SystemExit(
+        f"error: generic --source {source!r} is ambiguous in multi-team project "
+        f"{project!r}; use exact planner seat, e.g. one of: {seats_list}"
+    )
+
+
+def _resolve_generic_planner_target(profile: object, target: str) -> str:
+    """Normalize or reject a generic planner target in multi-team projects."""
+    if target not in _GENERIC_PLANNER_SOURCES:
+        return target
+
+    seat_roles: dict[str, str] = getattr(profile, "seat_roles", {}) or {}
+    exact_planner_seats = [
+        seat for seat, role in seat_roles.items()
+        if role in _PLANNER_ROLES_FOR_GUARD and seat not in _GENERIC_PLANNER_SOURCES
+    ]
+
+    if not exact_planner_seats:
+        return target
+
+    if len(exact_planner_seats) == 1:
+        exact = exact_planner_seats[0]
+        print(
+            f"info: normalized generic --target {target!r} to exact planner seat {exact!r}",
+            file=sys.stderr,
+        )
+        return exact
+
+    seats_list = ", ".join(sorted(exact_planner_seats))
+    project = getattr(profile, "project_name", "?")
+    raise SystemExit(
+        f"error: generic --target {target!r} is ambiguous in multi-team project "
+        f"{project!r}; use exact planner seat or route chain-end relay to memory. "
+        f"Exact planner seats: {seats_list}"
+    )
 
 
 def main() -> int:
@@ -909,6 +1107,9 @@ def main() -> int:
         )
     if args.user_summary is not None and not args.user_summary.strip():
         raise SystemExit("user_summary must not be empty")
+    # MP012: normalize or reject generic planner source before any receipt I/O.
+    args.source = _resolve_generic_planner_source(profile, args.source)
+    args.target = _resolve_generic_planner_target(profile, args.target)
     if (
         not args.enforce_planner_self_closeout
         and args.source in {"planner", "planner-dispatcher"}
@@ -1148,15 +1349,38 @@ def main() -> int:
         task_id=args.task_id,
         summary=summary,
     )
+    try:
+        source_v3_queue_path = complete_v3_brief_queue_if_possible(
+            profile,
+            seat=args.source,
+            task_id=args.task_id,
+            status=args.status,
+            verdict=args.verdict,
+            summary=summary,
+        )
+    except (V3QueueError, OSError) as exc:
+        source_v3_queue_path = None
+        print(
+            f"warn: v3 brief queue completion sync failed for {args.task_id}: {exc}",
+            file=sys.stderr,
+        )
     receipt["delivery_path"] = str(delivery_path)
     receipt["delivered_at"] = utc_now_iso()
     receipt["source_todo_path"] = str(source_todo_path)
+    if source_v3_queue_path is not None:
+        receipt["source_v3_queue_path"] = str(source_v3_queue_path)
     receipt["used_fallback_delivery"] = used_fallback_delivery
     receipt["verdict"] = args.verdict
     receipt["frontstage_disposition"] = args.frontstage_disposition
     receipt["next_action"] = args.next_action
-    receipt["head_contains_commit"] = head_contains_commit
-    receipt["lineage_status"] = lineage_status
+    # v3 spec §10 item 6: `_validate_completion_receipt` may have downgraded
+    # lineage_status to 'divergent' on branch_base mismatch. Preserve that
+    # downgrade by reading the dict (not the cached local value from
+    # `_annotate_lineage_status` at line ~1018).
+    final_lineage_status = str(receipt.get("lineage_status") or lineage_status)
+    final_head_contains_commit = bool(receipt.get("head_contains_commit", head_contains_commit))
+    receipt["head_contains_commit"] = final_head_contains_commit
+    receipt["lineage_status"] = final_lineage_status
     if planner_to_frontstage:
         frontstage_todo = profile.todo_path(args.target)
         append_task_to_queue(
@@ -1184,7 +1408,12 @@ def main() -> int:
         )
         receipt["todo_path"] = str(frontstage_todo)
         receipt["assigned_at"] = utc_now_iso()
-    if lineage_status == "divergent" and reported_commit and args.target != "memory":
+    # v3 spec §10 item 6 (audit fix 2): use final_lineage_status so the
+    # soft-failed branch_base-mismatch path triggers PASS_NEEDS_INTEGRATION
+    # notification to memory. Cached `lineage_status` from line ~1018
+    # reflects only the merge-base ancestry check, not the subsequent soft
+    # downgrade in `_validate_completion_receipt`.
+    if final_lineage_status == "divergent" and reported_commit and args.target != "memory":
         _emit_pass_needs_integration(
             profile,
             task_id=args.task_id,
@@ -1218,7 +1447,7 @@ def main() -> int:
             target=args.target,
             user_summary=args.user_summary,
         )
-        if lineage_status == "divergent" and reported_commit:
+        if final_lineage_status == "divergent" and reported_commit:
             message += (
                 "\n\n"
                 f"{PASS_NEEDS_INTEGRATION}: "

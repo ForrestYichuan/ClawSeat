@@ -28,7 +28,13 @@ def _init_repo(tmp_path: Path) -> Path:
     return repo
 
 
-def _dispatch_with_force(profile: Path, task_id: str, *, force_parallel_builder: bool = False) -> subprocess.CompletedProcess[str]:
+def _dispatch_with_force(
+    profile: Path,
+    task_id: str,
+    *,
+    target: str = "builder",
+    force_parallel_builder: bool = False,
+) -> subprocess.CompletedProcess[str]:
     cmd = [
         sys.executable,
         str(DISPATCH_SCRIPT),
@@ -37,7 +43,7 @@ def _dispatch_with_force(profile: Path, task_id: str, *, force_parallel_builder:
         "--source",
         "planner",
         "--target",
-        "builder",
+        target,
         "--task-id",
         task_id,
         "--title",
@@ -55,6 +61,54 @@ def _dispatch_with_force(profile: Path, task_id: str, *, force_parallel_builder:
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
+def _write_multi_builder_profile(tmp_path: Path, repo_root: Path) -> tuple[Path, Path, Path]:
+    tasks = tmp_path / "tasks"
+    handoffs = tmp_path / "handoffs"
+    workspaces = tmp_path / "workspaces"
+    for seat in ("planner", "builder-a", "builder-b"):
+        (tasks / seat).mkdir(parents=True)
+    handoffs.mkdir()
+    workspaces.mkdir()
+    profile = tmp_path / "profile-multi-builder.toml"
+    profile.write_text(
+        f"""\
+version = 1
+profile_name = "test-profile"
+project_name = "test"
+template_name = "gstack-harness"
+repo_root = "{repo_root}"
+tasks_root = "{tasks}"
+workspace_root = "{workspaces}"
+handoff_dir = "{handoffs}"
+project_doc = "{tasks}/PROJECT.md"
+tasks_doc = "{tasks}/TASKS.md"
+status_doc = "{tasks}/STATUS.md"
+send_script = "/bin/echo"
+status_script = "/bin/echo"
+patrol_script = "/bin/echo"
+agent_admin = "/bin/echo"
+heartbeat_receipt = "{workspaces}/koder/HEARTBEAT_RECEIPT.toml"
+heartbeat_transport = "tmux"
+default_notify_target = "planner"
+heartbeat_owner = "koder"
+heartbeat_seats = []
+active_loop_owner = "planner"
+seats = ["planner", "builder-a", "builder-b"]
+
+[seat_roles]
+planner = "planner-dispatcher"
+builder-a = "builder"
+builder-b = "builder"
+
+[dynamic_roster]
+materialized_seats = ["planner", "builder-a", "builder-b"]
+""",
+        encoding="utf-8",
+    )
+    (tasks / "TASKS.md").write_text("", encoding="utf-8")
+    return profile, handoffs, tasks
+
+
 def test_builder_dispatch_lock_blocks_second_dispatch(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
     profile, handoffs, _tasks = _write_profile(tmp_path, repo)
@@ -64,7 +118,8 @@ def test_builder_dispatch_lock_blocks_second_dispatch(tmp_path: Path) -> None:
 
     blocked = _dispatch_with_force(profile, "task-2")
     assert blocked.returncode != 0
-    assert "BLOCKED: builder dispatch outstanding (task-1); awaiting __builder__planner.json" in blocked.stderr
+    assert "BLOCKED: builder seat builder dispatch outstanding (task-1)" in blocked.stderr
+    assert "stacking another task on the same seat" in blocked.stderr
     assert not (handoffs / "task-2__planner__builder.json").exists()
 
 
@@ -77,5 +132,23 @@ def test_force_parallel_builder_bypasses_lock(tmp_path: Path) -> None:
 
     forced = _dispatch_with_force(profile, "task-2", force_parallel_builder=True)
     assert forced.returncode == 0
-    assert "WARNING: bypassing serial dispatch lock; multi-dispatch wakeup collapse risk" in forced.stderr
+    assert "WARNING: bypassing same-seat builder dispatch lock" in forced.stderr
     assert (handoffs / "task-2__planner__builder.json").exists()
+
+
+def test_builder_dispatch_lock_is_per_exact_builder_seat(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    profile, handoffs, _tasks = _write_multi_builder_profile(tmp_path, repo)
+
+    first = _dispatch_with_force(profile, "task-a", target="builder-a")
+    assert first.returncode == 0, first.stderr
+
+    second = _dispatch_with_force(profile, "task-b", target="builder-b")
+    assert second.returncode == 0, second.stderr
+    assert (handoffs / "task-a__planner__builder-a.json").exists()
+    assert (handoffs / "task-b__planner__builder-b.json").exists()
+
+    stacked = _dispatch_with_force(profile, "task-a2", target="builder-a")
+    assert stacked.returncode != 0
+    assert "BLOCKED: builder seat builder-a dispatch outstanding (task-a)" in stacked.stderr
+    assert not (handoffs / "task-a2__planner__builder-a.json").exists()

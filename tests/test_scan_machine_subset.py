@@ -42,6 +42,21 @@ def run_scan(*extra_args: str, memory_dir: str) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, check=False)
 
 
+@pytest.fixture(scope="module")
+def default_scan_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    memory_dir = tmp_path_factory.mktemp("scan-machine-default")
+    result = run_scan(memory_dir=str(memory_dir))
+    assert result.returncode == 0, f"stderr: {result.stderr}"
+    return memory_dir
+
+
+@pytest.fixture(scope="module")
+def default_machine_files(default_scan_dir: Path) -> set[str]:
+    machine_dir = default_scan_dir / "machine"
+    assert machine_dir.is_dir()
+    return {p.name for p in machine_dir.iterdir() if p.is_file()}
+
+
 # ── MACHINE_DEFAULT_SCANNERS constant ─────────────────────────────────────────
 
 
@@ -60,75 +75,54 @@ def test_machine_default_scanners_contains_core_five():
 # ── Default scan output ───────────────────────────────────────────────────────
 
 
-def test_default_scan_produces_exactly_5_files(tmp_path):
-    result = run_scan(memory_dir=str(tmp_path))
-    assert result.returncode == 0, f"stderr: {result.stderr}"
-
-    machine_dir = tmp_path / "machine"
-    assert machine_dir.is_dir()
-    machine_files = set(p.name for p in machine_dir.iterdir() if p.is_file())
-    assert len(machine_files) == 5
+def test_default_scan_produces_exactly_5_files(default_machine_files):
+    assert len(default_machine_files) == 5
 
 
-def test_default_scan_file_count_le_6(tmp_path):
-    run_scan(memory_dir=str(tmp_path))
-    machine_dir = tmp_path / "machine"
-    count = sum(1 for p in machine_dir.iterdir() if p.is_file())
-    assert count <= 6, f"Expected ≤6 files in machine/, got {count}: {list(machine_dir.iterdir())}"
+def test_default_scan_file_count_le_6(default_machine_files):
+    assert len(default_machine_files) <= 6, f"Expected ≤6 files in machine/, got {default_machine_files}"
 
 
-def test_default_scan_files_within_whitelist(tmp_path):
-    run_scan(memory_dir=str(tmp_path))
-    machine_dir = tmp_path / "machine"
-    actual_files = set(p.name for p in machine_dir.iterdir() if p.is_file())
-    unexpected = actual_files - MACHINE_WHITELIST
+def test_default_scan_files_within_whitelist(default_machine_files):
+    unexpected = default_machine_files - MACHINE_WHITELIST
     assert not unexpected, f"Unexpected files in machine/: {unexpected}"
 
 
-def test_default_scan_does_not_write_repos(tmp_path):
-    run_scan(memory_dir=str(tmp_path))
-    assert not (tmp_path / "machine" / "repos.json").exists()
+def test_default_scan_does_not_write_repos(default_scan_dir):
+    assert not (default_scan_dir / "machine" / "repos.json").exists()
 
 
-def test_default_scan_does_not_write_gstack(tmp_path):
-    run_scan(memory_dir=str(tmp_path))
-    assert not (tmp_path / "machine" / "gstack.json").exists()
+def test_default_scan_does_not_write_gstack(default_scan_dir):
+    assert not (default_scan_dir / "machine" / "gstack.json").exists()
 
 
-def test_default_scan_does_not_write_clawseat(tmp_path):
-    run_scan(memory_dir=str(tmp_path))
-    assert not (tmp_path / "machine" / "clawseat.json").exists()
+def test_default_scan_does_not_write_clawseat(default_scan_dir):
+    assert not (default_scan_dir / "machine" / "clawseat.json").exists()
 
 
-def test_default_scan_writes_current_context(tmp_path):
-    run_scan(memory_dir=str(tmp_path))
-    assert (tmp_path / "machine" / "current_context.json").exists()
+def test_default_scan_writes_current_context(default_scan_dir):
+    assert (default_scan_dir / "machine" / "current_context.json").exists()
 
 
-def test_default_scan_writes_credentials(tmp_path):
-    run_scan(memory_dir=str(tmp_path))
-    assert (tmp_path / "machine" / "credentials.json").exists()
+def test_default_scan_writes_credentials(default_scan_dir):
+    assert (default_scan_dir / "machine" / "credentials.json").exists()
 
 
-def test_default_scan_writes_network(tmp_path):
-    run_scan(memory_dir=str(tmp_path))
-    assert (tmp_path / "machine" / "network.json").exists()
+def test_default_scan_writes_network(default_scan_dir):
+    assert (default_scan_dir / "machine" / "network.json").exists()
 
 
-def test_default_scan_writes_github(tmp_path):
-    run_scan(memory_dir=str(tmp_path))
-    assert (tmp_path / "machine" / "github.json").exists()
+def test_default_scan_writes_github(default_scan_dir):
+    assert (default_scan_dir / "machine" / "github.json").exists()
 
 
-def test_default_scan_writes_openclaw(tmp_path):
-    run_scan(memory_dir=str(tmp_path))
-    assert (tmp_path / "machine" / "openclaw.json").exists()
+def test_default_scan_writes_openclaw(default_scan_dir):
+    assert (default_scan_dir / "machine" / "openclaw.json").exists()
 
 
-def test_index_is_at_root_not_machine(tmp_path):
-    run_scan(memory_dir=str(tmp_path))
-    assert (tmp_path / "index.json").exists()
-    assert not (tmp_path / "machine" / "index.json").exists()
+def test_index_is_at_root_not_machine(default_scan_dir):
+    assert (default_scan_dir / "index.json").exists()
+    assert not (default_scan_dir / "machine" / "index.json").exists()
 
 
 # ── Legacy scanners still accessible via --only ───────────────────────────────
@@ -149,7 +143,7 @@ def test_only_system_writes_to_machine(tmp_path):
 def test_only_combined_keeps_count_controlled(tmp_path):
     # Explicitly requesting 6 scanners gives 6 files
     result = run_scan(
-        "--only", "credentials,network,openclaw,github,current_context,system",
+        "--only", "credentials,network,openclaw,current_context,environment,gstack",
         memory_dir=str(tmp_path),
     )
     assert result.returncode == 0

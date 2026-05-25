@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "clawseat://schemas/acceptance_result.schema.json",
+  "title": "ClawSeat acceptance execution result (v3 §4.7)",
+  "description": "Durable receipt of an acceptance run. Written to tasks/<p>/<t>/acceptance/<task_id>__mechanical.json + per-route routing receipts.",
+  "type": "object",
+  "required": ["task_id", "project", "team", "ts", "route", "verdict"],
+  "properties": {
+    "task_id": {"type": "string"},
+    "project": {"type": "string"},
+    "team": {"type": "string"},
+    "ts": {"type": "string", "format": "date-time"},
+    "route": {
+      "type": "string",
+      "enum": ["mechanical", "reviewer", "operator"]
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["PASS", "FAIL", "PENDING"]
+    },
+    "items": {
+      "type": "array",
+      "description": "Per-criterion results.",
+      "items": {
+        "type": "object",
+        "required": ["criterion", "result"],
+        "properties": {
+          "criterion": {"type": "string", "description": "Original criterion text from brief"},
+          "result": {"type": "string", "enum": ["pass", "fail", "pending", "skipped"]},
+          "command": {"type": "string", "description": "Shell command run (mechanical only)"},
+          "exit_code": {"type": "integer"},
+          "stdout_path": {"type": "string"},
+          "stderr_path": {"type": "string"},
+          "runtime_ms": {"type": "integer", "minimum": 0},
+          "dispatch_receipt": {"type": "string", "description": "Reviewer route: handoff json path"},
+          "operator_answer": {"type": "string", "description": "Operator route: filled by operator"},
+          "answered_ts": {"type": "string", "format": "date-time"}
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "properties": {
+        "total": {"type": "integer", "minimum": 0},
+        "pass": {"type": "integer", "minimum": 0},
+        "fail": {"type": "integer", "minimum": 0},
+        "pending": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

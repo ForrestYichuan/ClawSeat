@@ -3,9 +3,22 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import sys as _sys, pathlib as _pl
+_sct_scripts = str(_pl.Path(__file__).resolve().parent)
+_sct_lib = str(_pl.Path(__file__).resolve().parent.parent / "lib")
+for _p in (_sct_scripts, _sct_lib):
+    if _p not in _sys.path:
+        _sys.path.insert(0, _p)
+from _toml_compat import loads_safe as _toml_loads, load_safe as _toml_load
 from pathlib import Path
 
-from core.lib.real_home import real_user_home
+# Import real_user_home via the flat-module path (core/lib on sys.path)
+# so this module works both as a CLI and when imported from an inline
+# Python block that only adds core/scripts to sys.path (e.g. sandbox.sh).
+try:
+    from real_home import real_user_home  # flat import: core/lib on sys.path
+except ImportError:
+    from core.lib.real_home import real_user_home  # package import fallback
 
 try:
     from seat_skill_mapping import skill_names_for_seat
@@ -23,6 +36,18 @@ def engineer_root(engineers_root: Path, seat_id: str) -> Path:
 
 def template_root(engineers_root: Path, seat_id: str) -> Path:
     return engineer_root(engineers_root, seat_id) / ".claude-template"
+
+
+def role_hint_from_engineer(engineers_root: Path, seat_id: str) -> str | None:
+    path = engineer_root(engineers_root, seat_id) / "engineer.toml"
+    if not path.is_file():
+        return None
+    try:
+        data = _toml_loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    role = str(data.get("role", "") or "").strip()
+    return role or None
 
 
 def render_settings_for_seat(seat_id: str, clawseat_root: Path | None = None) -> dict[str, object]:
@@ -56,9 +81,11 @@ def ensure_seat_claude_template(
     engineers_root: Path,
     seat_id: str,
     *,
+    role_hint: str | None = None,
     clawseat_root: Path | None = None,
 ) -> Path:
     clawseat_root = (clawseat_root or REPO_ROOT).resolve()
+    role_hint = role_hint or role_hint_from_engineer(engineers_root, seat_id)
     root = template_root(engineers_root, seat_id)
     skills_root = root / "skills"
     root.mkdir(parents=True, exist_ok=True)
@@ -66,7 +93,7 @@ def ensure_seat_claude_template(
         shutil.rmtree(skills_root)
     skills_root.mkdir(parents=True, exist_ok=True)
 
-    for skill_name in skill_names_for_seat(seat_id):
+    for skill_name in skill_names_for_seat(seat_id, role_hint=role_hint):
         source_dir = clawseat_root / "core" / "skills" / skill_name
         if not source_dir.is_dir():
             raise FileNotFoundError(f"seat template skill not found for {seat_id}: {source_dir}")
@@ -93,11 +120,14 @@ def copy_seat_claude_template_to_runtime(
     seat_id: str,
     runtime_claude_root: Path,
     *,
+    role_hint: str | None = None,
     clawseat_root: Path | None = None,
 ) -> Path:
+    role_hint = role_hint or role_hint_from_engineer(engineers_root, seat_id)
     template_dir = ensure_seat_claude_template(
         engineers_root,
         seat_id,
+        role_hint=role_hint,
         clawseat_root=clawseat_root,
     )
     runtime_claude_root.mkdir(parents=True, exist_ok=True)
@@ -126,6 +156,7 @@ def _parse_args() -> argparse.Namespace:
         default=str(REPO_ROOT),
         help="ClawSeat checkout used to source core/skills/*.",
     )
+    parser.add_argument("--role-hint", help="Optional engineer role hint, e.g. planner-dispatcher.")
     return parser.parse_args()
 
 
@@ -134,6 +165,7 @@ def main() -> int:
     root = ensure_seat_claude_template(
         Path(args.engineers_root).expanduser().resolve(),
         args.seat,
+        role_hint=args.role_hint,
         clawseat_root=Path(args.clawseat_root).expanduser().resolve(),
     )
     print(root)

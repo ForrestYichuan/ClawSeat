@@ -31,7 +31,7 @@ jobs:
         run: echo "CLAWSEAT_ROOT=$(pwd)" >> $GITHUB_ENV
 
       - name: Pytest
-        run: python -m pytest tests/ -v
+        run: python -m pytest tests/ -v --durations=50
 
       - name: Skill registry check
         run: python core/scripts/skill_manager.py check

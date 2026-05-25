@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULT_CLAWSEAT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-CLAWSEAT_ROOT="${CLAWSEAT_ROOT:-${CLAUDE_PROJECT_DIR:-$DEFAULT_CLAWSEAT_ROOT}}"
+CLAWSEAT_ROOT="${CLAWSEAT_ROOT:-$DEFAULT_CLAWSEAT_ROOT}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 MAX_CHARS="${PLANNER_STOP_HOOK_MAX_CHARS:-18000}"
 
@@ -68,12 +68,15 @@ if len(text) > max_chars:
 project = str(os.environ.get("CLAWSEAT_PROJECT", "") or "").strip()
 binding_path = ""
 pattern = re.compile(r"(?P<agents_root>.+/\.agents)/workspaces/(?P<project>[^/]+)/planner(?:/.*)?$")
+pattern_any_seat = re.compile(r"(?P<agents_root>.+/\.agents)/workspaces/(?P<project>[^/]+)/(?P<seat>[^/]+)(?:/.*)?$")
 for candidate in (cwd, os.environ.get("CLAUDE_PROJECT_DIR", ""), os.getcwd()):
     candidate = str(candidate or "").strip()
     if not candidate:
         continue
     resolved = str(Path(candidate).expanduser())
     match = pattern.search(resolved)
+    if not match:
+        match = pattern_any_seat.search(resolved)
     if not match:
         continue
     if not project:
@@ -87,6 +90,7 @@ if project and not binding_path:
 emit("PLANNER_HOOK_TEXT", text)
 emit("PLANNER_HOOK_PROJECT", project)
 emit("PLANNER_HOOK_BINDING_PATH", binding_path)
+emit("PLANNER_HOOK_WORKSPACE", cwd or os.environ.get("CLAUDE_PROJECT_DIR", "") or os.getcwd())
 PY
 }
 
@@ -127,8 +131,21 @@ send_broadcast() {
   done || true
 }
 
+run_auto_compact() {
+  local project="$1" text="$2" workspace="$3"
+  local helper="$CLAWSEAT_ROOT/core/skills/planner/scripts/planner_auto_compact.py"
+  [[ "${PLANNER_AUTO_COMPACT_ENABLED:-1}" == "1" ]] || return 0
+  [[ -f "$helper" ]] || { echo "[planner-hook] planner_auto_compact helper missing; skip" >&2; return 0; }
+  PLANNER_AUTO_COMPACT_PROJECT="$project" \
+  PLANNER_AUTO_COMPACT_TEXT="$text" \
+  PLANNER_AUTO_COMPACT_WORKSPACE="$workspace" \
+  "$PYTHON_BIN" "$helper" 2>&1 | while IFS= read -r line; do
+    echo "[planner-hook] $line" >&2
+  done || true
+}
+
 main() {
-  local payload_json="" parsed="" project="" binding_path="" group_id=""
+  local payload_json="" parsed="" project="" binding_path="" group_id="" workspace=""
   payload_json="$(cat || true)"
   [[ -n "$payload_json" ]] || exit 0
 
@@ -138,7 +155,11 @@ main() {
 
   project="${PLANNER_HOOK_PROJECT:-}"
   binding_path="${PLANNER_HOOK_BINDING_PATH:-}"
+  workspace="${PLANNER_HOOK_WORKSPACE:-${CLAUDE_PROJECT_DIR:-$PWD}}"
   [[ -n "$project" ]] || { echo "[planner-hook] no project resolvable; skip" >&2; exit 0; }
+
+  run_auto_compact "$project" "${PLANNER_HOOK_TEXT:-}" "$workspace"
+
   [[ -n "$binding_path" && -f "$binding_path" ]] || { echo "[planner-hook] no PROJECT_BINDING.toml; skip" >&2; exit 0; }
 
   [[ "${CLAWSEAT_FEISHU_ENABLED:-1}" == "0" ]] && { echo "[planner-hook] CLAWSEAT_FEISHU_ENABLED=0; skip" >&2; exit 0; }

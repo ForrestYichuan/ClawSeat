@@ -11,4 +11,5 @@ def test_planner_context_policy_forbids_clear_marker() -> None:
     text = _PLANNER_POLICY.read_text(encoding="utf-8")
 
     assert "[CLEAR-REQUESTED] FORBIDDEN" in text
-    assert "[COMPACT-REQUESTED] ONLY" in text
+    assert "[memory: compact-me]" in text
+    assert "does not emit direct stop-hook lifecycle markers" in text

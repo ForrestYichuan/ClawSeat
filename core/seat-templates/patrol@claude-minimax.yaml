@@ -1,0 +1,28 @@
+---
+template_name: patrol@claude-minimax
+role: patrol
+tool: claude
+provider: minimax
+auth_mode: api
+cost_class: low
+default_skills:
+  - patrol
+  - test-runner
+  - fuzz-harness
+boot_command: "claude --workspace {workspace} --provider minimax"
+session_kind: tmux
+capabilities:
+  - test-execution
+  - fuzz-execution
+  - drift-monitoring
+boundary: "executes tests + relays anomalies; does NOT make architectural decisions or protocol arbitration"
+---
+
+# Patrol seat (Claude Code via Minimax)
+
+High-frequency low-cost test runner. Executes fuzz harnesses, contract
+drift checks, integration regressions on schedule. Reports findings to
+memory; never escalates or decides — memory owns response.
+
+Per §6.4: Minimax-mode is permitted only for patrol/test-runner. Builder,
+reviewer, memory roles forbidden.

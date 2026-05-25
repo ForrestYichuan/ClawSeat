@@ -64,6 +64,58 @@ def test_liveness_gate_returns_alive_seats_only(
     ]
 
 
+def test_liveness_gate_seats_table_includes_seat_id_for_exact_filter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db_path = tmp_path / "state.db"
+    monkeypatch.setenv("CLAWSEAT_STATE_DB", str(db_path))
+    now = datetime.now(timezone.utc)
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE seats (
+              project TEXT,
+              seat_id TEXT,
+              role TEXT,
+              tool TEXT,
+              auth_mode TEXT,
+              provider TEXT,
+              status TEXT,
+              last_heartbeat TEXT,
+              session_name TEXT,
+              workspace TEXT
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO seats VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "install",
+                "builder-1",
+                "builder",
+                "codex",
+                "oauth",
+                "openai",
+                "live",
+                now.isoformat(),
+                "install-builder-1-codex",
+                "/tmp/ws",
+            ),
+        )
+
+    assert query_seat_liveness("install", max_age_seconds=300) == [
+        {
+            "seat_id": "builder-1",
+            "role": "builder",
+            "session_name": "install-builder-1-codex",
+            "status": "alive",
+            "last_heartbeat_ts": now.isoformat(),
+        }
+    ]
+
+
 def test_assign_owner_swallow_when_restart_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(assign_owner_module, "restart_seat", lambda project, role: False)
 

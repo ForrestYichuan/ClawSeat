@@ -731,7 +731,12 @@ def _check_skills(active_roles: set[str] | None = None) -> list[PreflightItem]:
         )]
 
 
-def preflight_check(project: str, phase: str = "runtime") -> PreflightResult:
+def preflight_check(
+    project: str,
+    phase: str = "runtime",
+    *,
+    skip_native_windows: bool = False,
+) -> PreflightResult:
     """
     Run all preflight checks for the given project.
 
@@ -767,8 +772,20 @@ def preflight_check(project: str, phase: str = "runtime") -> PreflightResult:
         ))
 
     if phase == "bootstrap":
-        items.append(_check_iterm2())
-        items.append(_check_iterm2_python_module())
+        if skip_native_windows:
+            items.append(PreflightItem(
+                name="iterm2",
+                status=PreflightStatus.PASS,
+                message="native iTerm window checks skipped (--no-window)",
+            ))
+            items.append(PreflightItem(
+                name="iterm2_python",
+                status=PreflightStatus.PASS,
+                message="iTerm2 Python module check skipped (--no-window)",
+            ))
+        else:
+            items.append(_check_iterm2())
+            items.append(_check_iterm2_python_module())
         items.append(_check_claude_required())
     else:
         # dynamic profile
@@ -923,6 +940,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Preflight mode: bootstrap skips runtime-only checks; runtime is the default.",
     )
     parser.add_argument(
+        "--no-window",
+        action="store_true",
+        help="Bootstrap without native iTerm windows; skip iTerm/iTerm2 Python hard checks.",
+    )
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Output machine-readable JSON",
@@ -940,7 +962,7 @@ def main() -> int:
     args = parser.parse_args()
     project = args.project_flag or args.project
 
-    result = preflight_check(project, phase=args.phase)
+    result = preflight_check(project, phase=args.phase, skip_native_windows=args.no_window)
 
     if args.auto_fix:
         for item in result.retryable_items:
@@ -948,7 +970,7 @@ def main() -> int:
             idx = result.items.index(item)
             result.items[idx] = fixed
         # Re-run to get updated status
-        result = preflight_check(project, phase=args.phase)
+        result = preflight_check(project, phase=args.phase, skip_native_windows=args.no_window)
 
     if args.json:
         import json as _json

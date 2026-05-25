@@ -239,6 +239,14 @@ def test_e2e_config_announce_via_profile(tmp_path, monkeypatch):
     profile_text = real_profile.read_text(encoding="utf-8")
     seats_match = _re.search(r"^seats\s*=\s*\[([^\]]*)\]", profile_text, _re.MULTILINE)
     target_seat = "builder-1" if seats_match and '"builder-1"' in seats_match.group(1) else "builder"
+    if seats_match and f'"{target_seat}"' not in seats_match.group(1):
+        profile_text = _re.sub(
+            r"^seats\s*=\s*\[[^\]]*\]",
+            f'seats = ["memory", "{target_seat}"]',
+            profile_text,
+            count=1,
+            flags=_re.MULTILINE,
+        )
     tasks_tmp = tmp_path / "tasks"
     ws_tmp = tmp_path / "workspaces"
     handoff_tmp = tmp_path / "handoffs"

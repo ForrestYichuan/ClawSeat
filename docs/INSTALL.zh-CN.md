@@ -40,7 +40,7 @@ bash ~/ClawSeat/scripts/install.sh --project <name>
 |------|---------|------|
 | `clawseat-engineering` | 5 | 工程类：memory + planner + builder + reviewer + patrol，绑 gstack skill |
 | `clawseat-creative` | 5 | 创意类（绑 cartooner skill）：memory + writer + builder-image + builder-av + patrol |
-| `clawseat-solo` | 3 | 极简协作，全 OAuth：memory + builder + planner-gemini |
+| `clawseat-solo` | v3 | legacy alias：seed `MULTI_TEAM_MINIMAL`，一个 project-memory 管 planner+builder 子项目组和 `quality-docs` |
 
 为什么使用 `install.sh`，而不是直接用 `agent_admin` 或 `agent-launcher.sh`：
 
@@ -184,10 +184,16 @@ ClawSeat 的 Feishu 是 write-only async notification，不订阅 Feishu。入�
 
 ## 1. 前置依赖（Prerequisites）
 
+窗口模式契约：
+
+- ClawSeat 独立使用默认打开原生 iTerm workers / memories 窗口，因此该可视化模式依赖 macOS + iTerm2 + `iterm2` Python module。
+- 配合 Cartooner 或内嵌终端使用时应传 `--no-window`；安装仍会启动 canonical tmux seats，但会跳过原生 iTerm 窗口以及 bootstrap 阶段的 iTerm hard check。
+- `--mode multi` 是 v3 多团队 / profile render 路径；它渲染已批准的团队 proposals 与 workspace skeleton，不打开 iTerm 窗口。
+
 推荐环境：
 
 - macOS 14+。
-- iTerm2，用于 workers / memories 可视化窗口。
+- iTerm2，用于 standalone workers / memories 可视化窗口；Cartooner 集成模式可用 `--no-window` 跳过。
 - `tmux`，用于每个 seat 的 canonical session。
 - `git`，用于 clone、自更新和 worktree 识别。
 - Python >= 3.11。`install.sh` 会自动解析 `python3.13`、`python3.12`、`python3.11`、
@@ -267,6 +273,15 @@ bash scripts/install.sh --load-all-skills
 # Disable Feishu notifications
 CLAWSEAT_FEISHU_ENABLED=0 bash scripts/install.sh --project myproj
 
+# Cartooner / embedded-terminal mode: tmux seats, no native iTerm windows
+bash scripts/install.sh --project myproj --template clawseat-creative --provider minimax --no-window
+
+# v3 multi-team dry-run after memory has written approved team proposals
+bash scripts/install.sh --mode multi --project myproj --teams core,content --dry-run
+
+# 最小 v3 项目组：solo alias 会 seed MULTI_TEAM_MINIMAL proposals
+bash scripts/install.sh --project myproj --template clawseat-solo --dry-run
+
 # Forget remembered per-seat harness choices from a previous run
 bash scripts/install.sh --reset-harness-memory
 ```
@@ -278,7 +293,7 @@ bash scripts/install.sh --reset-harness-memory
 | `--project <name>` | 安装或重装指定 ClawSeat project。默认 `install`。 |
 | `--repo-root <path>` | 设置 seat cwd 使用的目标项目仓库。 |
 | `--force-repo-root <path>` | 多 worktree 自动选择错误时，强制指定 ClawSeat install code root。 |
-| `--template <clawseat-engineering\|clawseat-creative\|clawseat-solo>` | 选择 roster template。clawseat-engineering 5 seats；clawseat-creative 5 seats；clawseat-solo 3 seats。 |
+| `--template <clawseat-engineering\|clawseat-creative\|clawseat-solo>` | 选择 install template。`clawseat-solo` 现在是 v3 `MULTI_TEAM_MINIMAL` 兼容别名，不再是独立 single-mode roster。 |
 | `--memory-tool <claude\|codex\|gemini>` | 覆盖 primary memory seat tool。非 Claude tool 会跳过 Claude provider selection。 |
 | `--memory-model <model>` | 当 memory tool 支持显式 model 时设置 memory model。 |
 | `--provider <mode\|n>` | 通过 detected candidate number 或 mode 选择 memory-seat provider。 |
@@ -291,6 +306,7 @@ bash scripts/install.sh --reset-harness-memory
 | `--load-all-skills` | 为非 Claude tool 也安装所有 bundled ClawSeat skills。Claude 总是获得完整集合。 |
 | `--dry-run` | 打印计划动作，尽可能不修改 host state。 |
 | `--detect-only` | 打印一次 `detect_all` JSON 环境摘要，并在产生安装副作用前退出。 |
+| `--no-window` | 跳过原生 iTerm workers/memories 窗口和 bootstrap 阶段 iTerm hard check；tmux seats 仍会启动，可从内嵌终端 attach。 |
 | `--reset-harness-memory` | 删除 remembered per-seat harness choices 并退出。 |
 | `--help` / `-h` | 打印 parser-owned usage line。 |
 
@@ -383,7 +399,7 @@ tmux capture-pane -t <session> -p -S - -E -
 
 1. Parse flags，解析 real user HOME，必要时选择 freshest ClawSeat worktree，并加载 `scripts/install/lib/`。
 2. 在 import `tomllib` 之前解析 Python >= 3.11。
-3. 解析 project template 和 roster：`clawseat-engineering` -> `memory, planner, builder, reviewer, patrol`；`clawseat-creative` -> `memory, writer, builder-image, builder-av, patrol`（绑 cartooner skill）；`clawseat-solo` -> `memory, builder, planner`。
+3. 解析 project template 和 roster：`clawseat-engineering` -> `memory, planner, builder, reviewer, patrol`；`clawseat-creative` -> `memory, writer, builder-image, builder-av, patrol`（绑 cartooner skill）；`clawseat-solo` -> v3 `MULTI_TEAM_MINIMAL`，seed planner+builder 子项目组和 `quality-docs` 后委托 `install_multi.sh`。
 4. 运行 legacy path migration 和 seat liveness reconciliation。
 5. 验证 host deps 并运行 `core/skills/memory-oracle/scripts/scan_environment.py --output ~/.agents/memory/`，
    生成 `machine/{credentials,network,openclaw,github,current_context}.json`。
@@ -547,8 +563,8 @@ Full install-script error-code inventory from `scripts/install.sh` and `scripts/
 
 | Source | Codes |
 |--------|-------|
-| `install.sh` | `COMMAND_FAILED`, `INVALID_FLAGS`, `INVALID_MEMORY_MODEL`, `INVALID_MEMORY_TOOL`, `INVALID_PROJECT` |
-| | `INVALID_REPO_ROOT`, `INVALID_TEMPLATE`, `UNKNOWN_FLAG` |
+| `install.sh` | `COMMAND_FAILED`, `INVALID_FLAGS`, `INVALID_MEMORY_MODEL`, `INVALID_MEMORY_TOOL`, `INVALID_MODE`, `INVALID_PROJECT` |
+| | `INVALID_REPO_ROOT`, `INVALID_TEMPLATE`, `MISSING_SCRIPT`, `UNKNOWN_FLAG` |
 | `lib/preflight.sh` | `ENV_SCAN_INCOMPLETE`, `INVALID_PYTHON_BIN`, `MISSING_PYTHON311`, `PREFLIGHT_FAILED` |
 | `lib/project.sh` | `AGENT_ADMIN_MISSING`, `BRIEF_CHMOD_FAILED`, `GUIDE_CHMOD_FAILED`, `GUIDE_DIR_FAILED`, `INVALID_PROJECT` |
 | | `KICKOFF_CHMOD_FAILED`, `KICKOFF_DIR_FAILED`, `KICKOFF_WRITE_FAILED`, `PROJECTS_JSON_ACTION_UNKNOWN`, `PROJECTS_REGISTRY_MISSING` |

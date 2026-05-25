@@ -77,6 +77,7 @@ run_claude_runtime() {
     # Re-apply preserved host env after the wipe.
     eval "$_oauth_host_env_snapshot"
     seed_user_tool_dirs "$HOME" "${CLAWSEAT_PROJECT:-}"
+    prepare_claude_host_oauth_state "$HOME" "$workdir"
     cd "$workdir"
     echo "────────────────────────────────────────"
     echo " Claude Code · Host OAuth (reuse)"
@@ -90,9 +91,27 @@ run_claude_runtime() {
     if [[ "${CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST:-}" == "1" ]]; then
       echo " Host-managed OAuth: yes (Claude Desktop wrapper)"
     fi
+    # Crash-recovery fallback: if Stop hook didn't fire (seat killed before
+    # clean exit) but cwd has prior Claude history, --continue picks up the
+    # most recent conversation. Only used when no precise --resume <uuid>
+    # is available from the hook-written .session file.
+    if [[ -z "$resume_label" && "${CLAWSEAT_NO_AUTO_RESUME:-0}" != "1" ]] \
+        && _has_claude_cwd_history "$HOME" "$workdir"; then
+      resume_args=(--continue)
+      resume_label="--continue (latest in cwd)"
+    fi
     echo "────────────────────────────────────────"
     [[ -n "$resume_label" ]] && launcher_resume_banner "$resume_label" >&2
-    exec claude --dangerously-skip-permissions ${resume_args[@]+"${resume_args[@]}"}
+    # Parent Codex/Claude sessions can export CLAUDECODE. Claude Code treats
+    # that as an active nested session and exits immediately, which makes the
+    # tmux seat disappear before restart-seat can observe it.
+    unset CLAUDECODE
+    # CARTOONER_CLAUDE_CODE_EXECUTABLE: when set (cartooner-spawned seats),
+    # bypass PATH resolution and exec the absolute binary directly. Avoids
+    # the pnpm sh wrapper layer that otherwise sits between tmux pane and
+    # native claude (process tree integrity for ClawSeat's pane_pid checks).
+    # Falls back to PATH `claude` for non-cartooner invocations.
+    exec "${CARTOONER_CLAUDE_CODE_EXECUTABLE:-claude}" --dangerously-skip-permissions ${resume_args[@]+"${resume_args[@]}"}
   fi
 
   local secret_file="" runtime_dir
@@ -180,16 +199,34 @@ run_claude_runtime() {
         mode_label="Anthropic Console API"
         ;;
       minimax)
+        if [[ -n "${CUSTOM_ENV_FILE:-}" ]] && [[ -f "$CUSTOM_ENV_FILE" ]]; then
+          load_custom_env "$CUSTOM_ENV_FILE"
+          export ANTHROPIC_AUTH_TOKEN="${LAUNCHER_CUSTOM_API_KEY:-}"
+          export ANTHROPIC_BASE_URL="${LAUNCHER_CUSTOM_BASE_URL:-}"
+          export ANTHROPIC_MODEL="${LAUNCHER_CUSTOM_MODEL:-}"
+        fi
         export API_TIMEOUT_MS=3000000
         export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
         mode_label="MiniMax API"
         ;;
       deepseek)
+        if [[ -n "${CUSTOM_ENV_FILE:-}" ]] && [[ -f "$CUSTOM_ENV_FILE" ]]; then
+          load_custom_env "$CUSTOM_ENV_FILE"
+          export ANTHROPIC_AUTH_TOKEN="${LAUNCHER_CUSTOM_API_KEY:-}"
+          export ANTHROPIC_BASE_URL="${LAUNCHER_CUSTOM_BASE_URL:-}"
+          export ANTHROPIC_MODEL="${LAUNCHER_CUSTOM_MODEL:-}"
+        fi
         export API_TIMEOUT_MS=3000000
         export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
         mode_label="DeepSeek API"
         ;;
       xcode)
+        if [[ -n "${CUSTOM_ENV_FILE:-}" ]] && [[ -f "$CUSTOM_ENV_FILE" ]]; then
+          load_custom_env "$CUSTOM_ENV_FILE"
+          export ANTHROPIC_AUTH_TOKEN="${LAUNCHER_CUSTOM_API_KEY:-}"
+          export ANTHROPIC_BASE_URL="${LAUNCHER_CUSTOM_BASE_URL:-}"
+          export ANTHROPIC_MODEL="${LAUNCHER_CUSTOM_MODEL:-}"
+        fi
         export API_TIMEOUT_MS=3000000
         export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
         mode_label="Xcode API"
@@ -219,7 +256,15 @@ run_claude_runtime() {
   echo " Endpoint:   ${ANTHROPIC_BASE_URL:-default}"
   echo " HOME:       $HOME"
   echo " AGENT_HOME: $AGENT_HOME"
+  # Crash-recovery fallback — see oauth branch comment above.
+  if [[ -z "$resume_label" && "${CLAWSEAT_NO_AUTO_RESUME:-0}" != "1" ]] \
+      && _has_claude_cwd_history "$HOME" "$workdir"; then
+    resume_args=(--continue)
+    resume_label="--continue (latest in cwd)"
+  fi
   echo "────────────────────────────────────────"
   [[ -n "$resume_label" ]] && launcher_resume_banner "$resume_label" >&2
-  exec claude --dangerously-skip-permissions ${resume_args[@]+"${resume_args[@]}"}
+  unset CLAUDECODE
+  # See oauth branch above for CARTOONER_CLAUDE_CODE_EXECUTABLE rationale.
+  exec "${CARTOONER_CLAUDE_CODE_EXECUTABLE:-claude}" --dangerously-skip-permissions ${resume_args[@]+"${resume_args[@]}"}
 }

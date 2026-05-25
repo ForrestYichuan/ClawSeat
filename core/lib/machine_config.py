@@ -17,10 +17,10 @@ for _p in (str(_REPO_ROOT), str(_REPO_ROOT / "core" / "lib")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-try:
-    import tomllib
-except ImportError:  # pragma: no cover
-    import tomli as tomllib  # type: ignore[no-redef]
+import sys as _sys, pathlib as _pl
+_mc_scripts = str(_pl.Path(__file__).resolve().parent.parent / "scripts")
+if _mc_scripts not in _sys.path: _sys.path.insert(0, _mc_scripts)
+from _toml_compat import loads_safe as _toml_loads, load_safe as _toml_load
 
 from openclaw_home import discover_openclaw_home
 from real_home import real_user_home
@@ -257,7 +257,7 @@ def load_machine(path: Path | None = None) -> MachineConfig:
         write_machine(cfg, resolved)
         return cfg
     try:
-        raw = tomllib.loads(resolved.read_text(encoding="utf-8"))
+        raw = _toml_loads(resolved.read_text(encoding="utf-8"))
     except Exception as exc:
         raise MachineConfigError(f"cannot parse {resolved}: {exc}") from exc
     return _parse_raw(raw, resolved)

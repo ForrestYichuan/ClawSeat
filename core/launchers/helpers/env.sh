@@ -204,6 +204,65 @@ _OAUTH_PRESERVE_HOST_MANAGED_VARS=(CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST \
                                    CLAUDE_CODE_SUBSCRIPTION_TYPE \
                                    CLAUDE_CODE_SDK_HAS_OAUTH_REFRESH)
 
+launcher_proxy_env_is_set() {
+  [[ -n "${HTTPS_PROXY:-}${HTTP_PROXY:-}${ALL_PROXY:-}${https_proxy:-}${http_proxy:-}${all_proxy:-}" ]]
+}
+
+launcher_detect_macos_system_proxy_exports() {
+  [[ "$(uname -s 2>/dev/null || true)" == "Darwin" ]] || return 0
+  command -v scutil >/dev/null 2>&1 || return 0
+
+  local line value
+  local http_enable="" http_host="" http_port=""
+  local https_enable="" https_host="" https_port=""
+  local socks_enable="" socks_host="" socks_port=""
+  while IFS= read -r line; do
+    value="${line##* : }"
+    case "$line" in
+      *"HTTPEnable : "*) http_enable="$value" ;;
+      *"HTTPProxy : "*) http_host="$value" ;;
+      *"HTTPPort : "*) http_port="$value" ;;
+      *"HTTPSEnable : "*) https_enable="$value" ;;
+      *"HTTPSProxy : "*) https_host="$value" ;;
+      *"HTTPSPort : "*) https_port="$value" ;;
+      *"SOCKSEnable : "*) socks_enable="$value" ;;
+      *"SOCKSProxy : "*) socks_host="$value" ;;
+      *"SOCKSPort : "*) socks_port="$value" ;;
+    esac
+  done < <(scutil --proxy 2>/dev/null || true)
+
+  local out="" proxy_value=""
+  if [[ "$http_enable" == "1" && -n "$http_host" && -n "$http_port" ]]; then
+    proxy_value="http://${http_host}:${http_port}"
+    out+="export http_proxy=$(printf '%q' "$proxy_value"); "
+    out+="export HTTP_PROXY=$(printf '%q' "$proxy_value"); "
+  fi
+  if [[ "$https_enable" == "1" && -n "$https_host" && -n "$https_port" ]]; then
+    proxy_value="http://${https_host}:${https_port}"
+    out+="export https_proxy=$(printf '%q' "$proxy_value"); "
+    out+="export HTTPS_PROXY=$(printf '%q' "$proxy_value"); "
+  fi
+  if [[ "$socks_enable" == "1" && -n "$socks_host" && -n "$socks_port" ]]; then
+    proxy_value="socks5://${socks_host}:${socks_port}"
+    out+="export all_proxy=$(printf '%q' "$proxy_value"); "
+    out+="export ALL_PROXY=$(printf '%q' "$proxy_value"); "
+  fi
+  if [[ -n "$out" && -z "${NO_PROXY:-}${no_proxy:-}" ]]; then
+    proxy_value="localhost,127.0.0.1,::1,.local"
+    out+="export no_proxy=$(printf '%q' "$proxy_value"); "
+    out+="export NO_PROXY=$(printf '%q' "$proxy_value"); "
+  fi
+  printf '%s\n' "$out"
+}
+
+ensure_launcher_proxy_env() {
+  launcher_proxy_env_is_set && return 0
+  local proxy_env_snapshot=""
+  proxy_env_snapshot="$(launcher_detect_macos_system_proxy_exports)"
+  [[ -n "$proxy_env_snapshot" ]] || return 0
+  eval "$proxy_env_snapshot"
+}
+
 # Args:
 #   $1 — include_host_managed_oauth: "1" (default) to also preserve
 #        CLAUDE_CODE_OAUTH_TOKEN + sibling host-managed markers when

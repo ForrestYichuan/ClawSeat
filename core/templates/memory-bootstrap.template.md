@@ -136,7 +136,7 @@ PY
   t     —— 切换模板后重建 harness overrides（先向 operator 展示模板摘要）
            - clawseat-creative: 5-seat 创意模板（memory + planner + builder + patrol + designer）
            - clawseat-engineering: 6-seat 工程模板（memory + planner + builder + reviewer + patrol + designer）
-           - clawseat-solo: 3-seat 全 OAuth 极简协作（memory + builder + planner-gemini）
+           - clawseat-solo: v3 MULTI_TEAM_MINIMAL 兼容别名（project-memory + planner+builder 子项目组 + quality-docs）
   c     —— 完全自定义，进入 B0.0.1 env_scan + LLM 分析 + 重选
 ```
 
@@ -272,7 +272,7 @@ for seat in [${PENDING_SEATS_HUMAN}]:
 4. 如果当前拉起的是 planner seat，跑：
    ```bash
    python3 core/skills/planner/scripts/install_planner_hook.py \
-     --workspace ${AGENT_HOME}/.agents/workspaces/${PROJECT_NAME}/planner \
+     --workspace ${AGENT_HOME}/.agents/workspaces/${PROJECT_NAME}/${seat} \
      --clawseat-root ${CLAWSEAT_ROOT}
    ```
 5. 等 canonical session 真起来：

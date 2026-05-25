@@ -429,7 +429,11 @@ class StoreHandlers:
         lines.append("")
         self.hooks.write_text(path, "\n".join(lines), None)
         try:
-            ensure_seat_claude_template(self.hooks.engineers_root, engineer.engineer_id)
+            ensure_seat_claude_template(
+                self.hooks.engineers_root,
+                engineer.engineer_id,
+                role_hint=engineer.role or None,
+            )
         except Exception as exc:
             raise self.hooks.error_cls(
                 f"failed to prepare Claude template for {engineer.engineer_id}: {exc}"
@@ -602,6 +606,56 @@ class StoreHandlers:
             template = self.load_template(project.template_name)
         except self.hooks.error_cls:
             return None
+        template_ids = {
+            self.hooks.normalize_name(str(spec.get("id", "")))
+            for spec in template.get("engineers", [])
+            if str(spec.get("id", "")).strip()
+        }
+        project_ids = [str(item) for item in getattr(project, "engineers", []) or []]
+        if project_ids and set(project_ids) != template_ids:
+            optional_skills = list(template.get("optional_skills", []))
+            project_profiles: dict[str, Any] = {}
+            for engineer_id in project_ids:
+                if self.engineer_path(engineer_id).exists():
+                    base_profile = self.load_engineer(engineer_id)
+                else:
+                    override = dict((project.seat_overrides or {}).get(engineer_id, {}))
+                    base_profile = self.create_engineer_profile(
+                        engineer_id=engineer_id,
+                        tool=str(override.get("tool", "") or "claude"),
+                        auth_mode=str(override.get("auth_mode", "") or "oauth"),
+                        provider=str(override.get("provider", "") or "anthropic"),
+                        role=str(override.get("role", "") or engineer_id),
+                        display_name=engineer_id,
+                    )
+                override = dict((project.seat_overrides or {}).get(engineer_id, {}))
+                if override:
+                    project_profiles[engineer_id] = self.merge_engineer_profile_with_template(
+                        base_profile,
+                        {
+                            "id": engineer_id,
+                            "tool": override.get("tool", base_profile.default_tool),
+                            "auth_mode": override.get("auth_mode", base_profile.default_auth_mode),
+                            "provider": override.get("provider", base_profile.default_provider),
+                            "role": override.get("role", base_profile.role),
+                            "display_name": override.get("display_name", base_profile.display_name),
+                            "role_details": override.get("role_details", base_profile.role_details),
+                            "skills": override.get("skills", base_profile.skills),
+                            "aliases": override.get("aliases", base_profile.aliases),
+                            "human_facing": override.get("human_facing", base_profile.human_facing),
+                            "active_loop_owner": override.get("active_loop_owner", base_profile.active_loop_owner),
+                            "dispatch_authority": override.get("dispatch_authority", base_profile.dispatch_authority),
+                            "patrol_authority": override.get("patrol_authority", base_profile.patrol_authority),
+                            "unblock_authority": override.get("unblock_authority", base_profile.unblock_authority),
+                            "escalation_authority": override.get("escalation_authority", base_profile.escalation_authority),
+                            "remind_active_loop_owner": override.get("remind_active_loop_owner", base_profile.remind_active_loop_owner),
+                            "review_authority": override.get("review_authority", base_profile.review_authority),
+                            "design_authority": override.get("design_authority", base_profile.design_authority),
+                        },
+                    )
+                else:
+                    project_profiles[engineer_id] = base_profile
+            return project_profiles, project_ids, optional_skills
         merged = self.merge_template_local(
             template,
             {

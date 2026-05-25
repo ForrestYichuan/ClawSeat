@@ -66,6 +66,25 @@ def test_zh_cn_doc_covers_key_flags_and_z_sections() -> None:
         assert keyword.lower() in zh_lower, f"ZH doc missing section keyword: {keyword}"
 
 
+def test_install_docs_explain_standalone_and_cartooner_window_modes() -> None:
+    """Docs must preserve the standalone iTerm vs Cartooner no-window contract."""
+    en = EN_DOC.read_text(encoding="utf-8")
+    zh = ZH_DOC.read_text(encoding="utf-8")
+    readme = README.read_text(encoding="utf-8")
+
+    assert "Standalone ClawSeat uses native iTerm" in en
+    assert "Cartooner-integrated or embedded-terminal ClawSeat should pass `--no-window`" in en
+    assert "bootstrap iTerm hard checks" in en
+    assert "`--mode multi` is the v3 multi-team/profile-render path" in en
+
+    assert "ClawSeat 独立使用默认打开原生 iTerm" in zh
+    assert "配合 Cartooner 或内嵌终端使用时应传 `--no-window`" in zh
+    assert "bootstrap 阶段的 iTerm hard check" in zh
+    assert "`--mode multi` 是 v3 多团队 / profile render 路径" in zh
+
+    assert "配合 Cartooner / 内嵌终端使用时可以走 `--no-window`" in readme
+
+
 def test_zh_cn_doc_lists_all_install_error_codes() -> None:
     """Every install-script die code appears in the Chinese install guide."""
     zh = ZH_DOC.read_text(encoding="utf-8")

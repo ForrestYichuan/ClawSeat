@@ -41,12 +41,6 @@ def source_roots() -> dict[str, Path]:
                 str(home / ".claude" / "plugins" / "marketplaces"),
             )
         ).expanduser(),
-        "superpowers": Path(
-            os.environ.get(
-                "CLAWSEAT_SKILL_CATALOG_SUPERPOWERS_ROOT",
-                str(REPO_ROOT / "core" / "references" / "superpowers-borrowed"),
-            )
-        ).expanduser(),
     }
 
 
@@ -83,7 +77,6 @@ def _write_markdown_catalog(path: Path, payload: dict) -> None:
         "- `~/.agents/skills/` - ClawSeat project and machine workflow skills.",
         "- `~/.claude/skills/` - gstack and local Claude skills.",
         "- `~/.claude/plugins/marketplaces/` - Anthropic/Claude marketplace plugin docs.",
-        "- `core/references/superpowers-borrowed/` - imported engineering practice references.",
         "",
         f"Total unique entries in this catalog: {len(skills)}.",
         "",
@@ -123,24 +116,18 @@ def _source_label(source: str) -> str:
         "clawseat": "~/.agents/skills/",
         "gstack": "~/.claude/skills/",
         "marketplace": "~/.claude/plugins/marketplaces/",
-        "superpowers": "core/references/superpowers-borrowed/",
     }.get(source, source)
 
 
 def _when_to_use(source: str) -> str:
     if source == "clawseat":
         return "ClawSeat seat workflow needs this role capability"
-    if source == "superpowers":
-        return "Planner or specialist needs a borrowed engineering practice"
     return "Use when the matching workflow is requested"
 
 
 def _candidate_docs(root: Path, *, source: str) -> Iterable[Path]:
     if not root.exists():
         return []
-    if source == "superpowers":
-        return sorted(path for path in root.glob("*.md") if path.is_file())
-
     docs: dict[str, Path] = {}
     for child in sorted(root.iterdir()):
         if child.is_dir() or child.is_symlink():
@@ -198,8 +185,6 @@ def _skill_name(path: Path, text: str, *, source: str) -> str:
     name = _frontmatter_name(text)
     if name:
         return name
-    if source == "superpowers":
-        return path.stem
     if path.name == "README.md":
         return path.parent.name
     return path.parent.name

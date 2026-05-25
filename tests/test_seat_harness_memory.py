@@ -67,3 +67,17 @@ def test_overwrite_updates_choice(tmp_path: Path) -> None:
     assert result["tool"] == "codex"
     assert result["auth_mode"] == "api"
     assert result["provider"] == "xcode-best"
+
+
+def test_load_uses_fallback_when_toml_modules_are_unavailable(tmp_path: Path, monkeypatch) -> None:
+    save_last_harness("planner", "codex", "api", "openai", model="gpt-5.4", home=tmp_path)
+    monkeypatch.setitem(sys.modules, "tomllib", None)
+    monkeypatch.setitem(sys.modules, "tomli", None)
+
+    result = load_last_harness("planner", home=tmp_path)
+
+    assert result is not None
+    assert result["tool"] == "codex"
+    assert result["auth_mode"] == "api"
+    assert result["provider"] == "openai"
+    assert result["model"] == "gpt-5.4"

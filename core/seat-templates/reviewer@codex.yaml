@@ -1,0 +1,27 @@
+---
+template_name: reviewer@codex
+role: reviewer
+tool: codex
+provider: openai
+auth_mode: api
+cost_class: medium
+default_skills:
+  - reviewer
+  - code-review
+  - contract-drift-check
+boot_command: "codex --workspace {workspace}"
+session_kind: tmux
+capabilities:
+  - code-review
+  - protocol-audit
+  - balance-audit
+  - image-gen
+---
+
+# Reviewer seat (Codex)
+
+Code + contract + balance reviewer. Defaults for memory-authored spec
+review (§17.3). Boundary: does NOT audit own-team Codex-generated images
+(§6.4 same-source ban) — those go to operator.
+
+Capabilities include image-gen as fallback when designer-image offline.

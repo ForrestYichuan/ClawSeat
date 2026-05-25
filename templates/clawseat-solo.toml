@@ -1,6 +1,6 @@
 version = 1
 template_name = "clawseat-solo"
-description = "Memory + builder + planner, all OAuth top models. Standard brief → workflow → dispatch → verdict cycle."
+description = "LEGACY ALIAS ONLY. install.sh maps clawseat-solo to v3 MULTI_TEAM_MINIMAL: project-memory + planner+builder subteams + quality-docs. This flat roster is kept for old project/bootstrap compatibility."
 # graceful-fallback: external skill refs below are optional installs; seats degrade gracefully when absent.
 
 [window_layout]

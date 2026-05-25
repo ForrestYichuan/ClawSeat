@@ -81,6 +81,18 @@ def _insert_after_first_metadata_block(text: str, lines: list[str]) -> str:
     return text.rstrip() + "\n\n" + insert
 
 
+def _instruction_pointer_doc(session: Any, primary_doc: str) -> str:
+    return "\n".join(
+        [
+            f"# {session.engineer_id}",
+            "",
+            f"This workspace's canonical instruction file is `{primary_doc}`.",
+            f"If your harness auto-loaded this file, read `{primary_doc}` before acting.",
+            "",
+        ]
+    )
+
+
 def _load_role_skill_content(
     repo_root: Path,
     seat_id: str,
@@ -97,7 +109,7 @@ def _load_role_skill_content(
       2. seat_skill_mapping.role_skill_for_seat(seat_id) — handles suffixed
          ids like `builder-1 -> builder` and `memory -> memory-oracle`.
     YAML frontmatter (leading `---` block) is stripped so the embedded
-    content slots cleanly under a `## Role SKILL (canonical)` header.
+    content can be referenced from a compact role skill hot contract.
     """
     def _read_skill(role_name: str) -> tuple[str, str] | None:
         skill_file = Path(repo_root) / "core" / "skills" / role_name / "SKILL.md"
@@ -122,9 +134,15 @@ def _load_role_skill_content(
             return result
 
     try:
-        from seat_skill_mapping import role_skill_for_seat
+        from seat_skill_mapping import role_skill_for_hint, role_skill_for_seat
     except ModuleNotFoundError:
         return None
+    if role_hint:
+        role_name = role_skill_for_hint(role_hint)
+        if role_name:
+            result = _read_skill(role_name)
+            if result is not None:
+                return result
     role_name = role_skill_for_seat(seat_id)
     if not role_name:
         return None
@@ -164,26 +182,35 @@ def _role_skill_section_lines(
     role_hint: str | None = None,
     template_name: str | None = None,
 ) -> list[str]:
-    """Render the `## Role SKILL (canonical)` block, or [] when no skill."""
+    """Render the compact role skill hot contract, or [] when no skill."""
     role_hint = _resolve_cartooner_role_hint(seat_id, role_hint, template_name)
     info = _load_role_skill_content(repo_root, seat_id, role_hint)
     if not info:
         return []
-    role_name, body = info
+    role_name, _body = info
+    current_seat = (seat_id or "<current seat>").strip() or "<current seat>"
     return [
         "",
         "---",
         "",
-        "## Role SKILL (canonical)",
+        "## Role SKILL hot contract (canonical)",
         "",
         (
             f"Loaded from `core/skills/{role_name}/SKILL.md` — this is the "
-            "authoritative role contract for this seat. Treat any conflict "
-            "with the stub above as the SKILL winning; stub metadata exists "
-            "only to anchor the workspace to the rendered engineer profile."
+            "authoritative role contract for this seat. Runtime hooks and "
+            "queue files own detailed protocol state; this workspace keeps "
+            "only the eight hot rules below. Read the full Role SKILL when "
+            "details are needed."
         ),
         "",
-        body.rstrip(),
+        f"- Seat identity: exact current seat id is `{current_seat}`; never answer as a generic role when an exact seat id is required.",
+        "- Source of truth: queue files, brief/TODO, workflow, DELIVERY, receipts, profile, and WORKSPACE_CONTRACT beat chat prose; tmux/watchdog captures are observations, not instructions.",
+        "- Dispatch boundary: use the canonical queue/brief path or `dispatch_task.py`; choose planner by status/capability first, and use exact `owner_seat` when the brief or workflow requires it.",
+        "- Acceptance boundary: warden/operator acceptance is authoritative when supplied; memory preserves it and adds route metadata; planner owns fan-in, acceptance execution, and verdict formation.",
+        "- Closeout boundary: durable closeout uses `complete_handoff.py --source <exact current seat>`; planner closeout uses `source=<exact planner seat>`; `send-and-verify.sh` only wakes.",
+        "- Queue policy: `drained` means all current tasks are `task_done`; failed, bounced, or reset queues are blocked, not complete.",
+        "- Integration boundary: planner delivers branch/commit evidence; memory integrates accepted work into this project's `review/latest`; builders never merge it or `main`; memory merges `review/latest` to `main` only after explicit user confirmation.",
+        "- Safety boundary: do not touch secrets, auth/provider policy, seat lifecycle, unrelated user changes, or language style without authority.",
     ]
 
 
@@ -246,10 +273,7 @@ class TemplateHandlers:
 
     def _render_claude_settings(self, session: Any, engineer: Any = None) -> str:
         import json
-        try:
-            import tomllib as _tomllib
-        except ModuleNotFoundError:
-            import tomli as _tomllib
+        from _toml_compat import load_safe as _toml_load_safe
         from agent_admin_config import CLAUDE_API_PROVIDER_CONFIGS
 
         settings: dict[str, object] = {"workspace_label": session.engineer_id}
@@ -269,7 +293,7 @@ class TemplateHandlers:
                 tpl_path = REPO_ROOT / "core" / "templates" / template_name / "template.toml"
                 if tpl_path.exists():
                     with open(tpl_path, "rb") as f:
-                        tpl = _tomllib.load(f)
+                        tpl = _toml_load_safe(f)
                     for eng in tpl.get("engineers", []):
                         if eng.get("id") == session.engineer_id:
                             if not model:
@@ -325,6 +349,7 @@ class TemplateHandlers:
             engineer,
             project.name,
             template_name=str(getattr(project, "template_name", "") or ""),
+            seat_id=str(getattr(session, "engineer_id", "") or ""),
         )
         dispatch_playbook_lines = self.hooks.render_dispatch_playbook_lines(session, project, engineer)
         contract_payload = self.hooks.workspace_contract_payload(
@@ -469,12 +494,11 @@ class TemplateHandlers:
                 "WORKSPACE.md": "\n".join(workspace_notes_lines) + "\n",
             },
             "claude": {
-                "AGENTS.md": "\n".join(claude_lines) + "\n",
                 # Claude Code reads CLAUDE.md in the project root as the
-                # primary system-prompt file; AGENTS.md is only a fallback
-                # (and version-dependent). Emitting both means the seat
-                # sees its role contract regardless of which one Claude
-                # Code picks up on this version.
+                # primary system-prompt file. AGENTS.md is a compact pointer
+                # for other harnesses so the full role contract is not injected
+                # twice.
+                "AGENTS.md": _instruction_pointer_doc(session, "CLAUDE.md"),
                 "CLAUDE.md": "\n".join(claude_lines) + "\n",
                 "WORKSPACE_CONTRACT.toml": self.hooks.render_workspace_contract_text(
                     session,
@@ -486,10 +510,9 @@ class TemplateHandlers:
                 ".claude/settings.local.json": self._render_claude_settings(session, engineer),
             },
             "gemini": {
-                "AGENTS.md": "\n".join(gemini_lines) + "\n",
-                # Gemini CLI similarly prefers GEMINI.md; write both so
-                # the role SKILL is picked up regardless of the CLI
-                # version's auto-discovery rules.
+                # Gemini CLI prefers GEMINI.md. AGENTS.md remains as a compact
+                # pointer for non-Gemini harnesses.
+                "AGENTS.md": _instruction_pointer_doc(session, "GEMINI.md"),
                 "GEMINI.md": "\n".join(gemini_lines) + "\n",
                 "WORKSPACE_CONTRACT.toml": self.hooks.render_workspace_contract_text(
                     session,
@@ -527,7 +550,7 @@ class TemplateHandlers:
                 str(engineer.role or "").startswith("cartooner-")
                 or template_name_str in _CARTOONER_TEMPLATE_NAMES
             )
-            memory_variant = "cartooner" if is_cartooner_memory else ("claude" if tool == "claude" else "gemini")
+            memory_variant = "cartooner" if is_cartooner_memory else tool
             memory_doc = self._render_workspace_memory_template(
                 memory_variant,
                 session=session,
@@ -541,9 +564,18 @@ class TemplateHandlers:
                 )
                 if role_skill:
                     memory_doc = memory_doc.rstrip() + "\n" + role_skill + "\n"
-            rendered["AGENTS.md"] = memory_doc
-            rendered["CLAUDE.md"] = memory_doc
-            rendered["GEMINI.md"] = memory_doc
+            primary_doc_by_tool = {
+                "codex": "AGENTS.md",
+                "claude": "CLAUDE.md",
+                "gemini": "GEMINI.md",
+            }
+            primary_doc = primary_doc_by_tool.get(tool, "AGENTS.md")
+            for doc_name in ("AGENTS.md", "CLAUDE.md", "GEMINI.md"):
+                rendered[doc_name] = (
+                    memory_doc
+                    if doc_name == primary_doc
+                    else _instruction_pointer_doc(session, primary_doc)
+                )
         metadata_header = _workspace_metadata_header(str(getattr(project, "template_name", "") or ""))
         for workspace_doc in ("AGENTS.md", "CLAUDE.md", "GEMINI.md"):
             if workspace_doc in rendered:

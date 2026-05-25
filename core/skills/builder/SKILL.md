@@ -19,7 +19,7 @@ See [core/references/todo-queue-priority.md](../../references/todo-queue-priorit
 ## Context Management
 See [core/references/context-management-protocol.md](../../references/context-management-protocol.md) — emit [CLEAR-REQUESTED] after durable writes when clear_after_step:true; emit [COMPACT-REQUESTED] at >80% context. Exactly one marker as final line.
 ## Failure mode: PTY exhaustion — Stop immediately; do NOT stop tmux/iTerm sessions; send `[BLOCKED:reason=pty-exhaustion]`; wait for memory cross-project recovery.
-## Borrowed Practices / Operator Language Matching: see [`core/references/superpowers-borrowed/`](../../references/superpowers-borrowed/); match last 3 operator messages; keep paths literal.
+## Operator Language Matching: match last 3 operator messages; keep paths, commands, task IDs, and technical terms literal.
 
 ## Closure Protocol (6-line block)
 

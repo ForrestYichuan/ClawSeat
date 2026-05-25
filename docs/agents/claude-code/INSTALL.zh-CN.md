@@ -37,7 +37,7 @@ AskUserQuestion reference JSON：
   "options": [
     {"label": "Creative (Recommended)", "description": "首次安装默认推荐。"},
     {"label": "Engineering", "description": "增加 reviewer，用于代码审查 lane。"},
-    {"label": "Solo", "description": "极简 3-seat 全 OAuth 配置。"}
+    {"label": "Solo", "description": "v3 MULTI_TEAM_MINIMAL 兼容别名。"}
   ]
 }
 ```

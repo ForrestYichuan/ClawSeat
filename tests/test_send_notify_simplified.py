@@ -37,7 +37,27 @@ def _mock_agentctl(tmp: Path) -> str:
 
 
 def _mk_session(name: str) -> None:
-    subprocess.run(["tmux", "new-session", "-d", "-s", name], check=True)
+    result = subprocess.run(
+        ["tmux", "new-session", "-d", "-s", name],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode == 0:
+        return
+    stderr = result.stderr.lower()
+    if (
+        "fork failed" in stderr
+        or "out of pty" in stderr
+        or "device not configured" in stderr
+    ):
+        pytest.skip(f"tmux cannot allocate a new PTY: {result.stderr.strip()}")
+    raise subprocess.CalledProcessError(
+        result.returncode,
+        ["tmux", "new-session", "-d", "-s", name],
+        output=result.stdout,
+        stderr=result.stderr,
+    )
 
 
 def _kill_session(name: str) -> None:

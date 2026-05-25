@@ -34,13 +34,13 @@ def test_install_docs_template_section_has_only_three() -> None:
         in en
     )
     assert (
-        "`clawseat-solo`: 3-seat collaboration template (memory + builder + planner-gemini),"
+        "`clawseat-solo`: legacy alias for v3 `MULTI_TEAM_MINIMAL`; seeds one or more `planner+builder` subteams plus `quality-docs` under one project memory."
         in en
     )
 
     assert "| `clawseat-engineering` | 5 | 工程类：memory + planner + builder + reviewer + patrol，绑 gstack skill |" in zh
     assert "| `clawseat-creative` | 5 | 创意类（绑 cartooner skill）：memory + writer + builder-image + builder-av + patrol |" in zh
-    assert "| `clawseat-solo` | 3 | 极简协作，全 OAuth：memory + builder + planner-gemini |" in zh
+    assert "| `clawseat-solo` | v3 | legacy alias：seed `MULTI_TEAM_MINIMAL`，一个 project-memory 管 planner+builder 子项目组和 `quality-docs` |" in zh
 
 
 def test_install_docs_default_recommended_engineering() -> None:
@@ -55,7 +55,7 @@ def test_architecture_reflects_three_template_rows() -> None:
     arch = ARCH_DOC.read_text(encoding="utf-8")
     assert "`clawseat-engineering` | memory planner builder reviewer patrol | 5 | Engineering chain with reviewer (QA + visual review)" in arch
     assert "`clawseat-creative` | memory writer builder-image builder-av patrol | 5 | Cartooner-bound creative team" in arch
-    assert "`clawseat-solo` | memory (claude oauth) + builder (codex oauth) + planner (gemini oauth) | 3 |" in arch
+    assert "`clawseat-solo` | project-memory + planner+builder subteam + quality-docs | v3 |" in arch
     assert "cartooner-creative" not in arch
     assert "team-creation" not in arch
 

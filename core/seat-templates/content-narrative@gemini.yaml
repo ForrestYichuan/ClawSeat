@@ -1,0 +1,30 @@
+---
+template_name: content-narrative@gemini
+role: content-narrative
+tool: gemini
+provider: google
+auth_mode: api
+cost_class: medium
+default_skills:
+  - content-narrative
+  - narrative-writing
+  - ui-copy
+  - localization-hint
+boot_command: "gemini --workspace {workspace}"
+session_kind: tmux
+capabilities:
+  - prose-authoring
+  - dialogue-writing
+  - tone-control
+  - lore-consistency
+---
+
+# Content-narrative seat (Gemini)
+
+Lighter-weight Gemini variant for narrative text without full design-system
+authority. Use when team needs textual content (dialogue / lore / UI copy)
+but designer-creative is overkill or another seat already holds it.
+
+Per §6.4 allowed roles for Gemini: designer-creative, content-narrative,
+frontend UI builder. This template specifically for the content-narrative
+specialization.

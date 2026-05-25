@@ -74,6 +74,23 @@ provider = "xcode-best"
 parallel_instances = 1
 """
 
+V3_MULTI_PROFILE = """\
+project_name = "multi"
+seats = ["memory", "front-planner", "front-builder"]
+
+[mode]
+team_structure = "multi"
+project_memory = "memory"
+
+[teams]
+front = { seats = ["front-planner", "front-builder"], team_type = "subteam", planner_mode = "delivery", notify_policy = "queue_drained_only" }
+
+[seat_roles]
+memory = "project-memory"
+front-planner = "planner"
+front-builder = "builder"
+"""
+
 
 @pytest.fixture()
 def fake_home(tmp_path, monkeypatch):
@@ -308,6 +325,7 @@ def test_cmd_project_seat_list_missing_profile(fake_home, capsys):
 # ---------------------------------------------------------------------------
 
 def test_cmd_project_validate_requires_validator(fake_home, monkeypatch, capsys):
+    _write_profile(fake_home, "install", V2_PROFILE)
     monkeypatch.setattr(layered, "_VALIDATOR_AVAILABLE", False)
     rc = layered.cmd_project_validate(argparse.Namespace(project="install"))
     assert rc == 2
@@ -324,6 +342,17 @@ def test_cmd_project_validate_ok(fake_home, monkeypatch, capsys):
     rc = layered.cmd_project_validate(argparse.Namespace(project="install"))
     assert rc == 0
     assert "ok:" in capsys.readouterr().out
+
+
+def test_cmd_project_validate_accepts_v3_multi_profile(fake_home, capsys):
+    _write_profile(fake_home, "multi", V3_MULTI_PROFILE)
+
+    rc = layered.cmd_project_validate(argparse.Namespace(project="multi"))
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "v3 multi" in out
+    assert "front" in out
 
 
 def test_cmd_project_validate_errors(fake_home, monkeypatch, capsys):

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ClawSeat v3 planner queue-poll launchd plist template.
+
+  Render with substitution:
+    PROJECT     → project name (e.g. sts-game)
+    TEAM        → team name; pass "ALL" for multi-team auto-discovery
+    TOOL        → backend tool name (claude / codex / gemini)
+    REPO_ROOT   → ClawSeat repo absolute path
+    LOG_DIR     → log directory (e.g. ~/.agents/logs)
+
+  Install:
+    cp planner-queue-poll.plist ~/Library/LaunchAgents/com.clawseat.<project>-<team>.plist
+    launchctl load ~/Library/LaunchAgents/com.clawseat.<project>-<team>.plist
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.clawseat.queue-poll.{PROJECT}.{TEAM}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>python3</string>
+    <string>{REPO_ROOT}/core/skills/planner/scripts/queue_poll.py</string>
+    <string>--project</string>
+    <string>{PROJECT}</string>
+    <string>--team</string>
+    <string>{TEAM}</string>
+    <string>--actor</string>
+    <string>planner@{TOOL}</string>
+  </array>
+  <key>StartInterval</key>
+  <integer>60</integer>
+  <key>StandardOutPath</key>
+  <string>{LOG_DIR}/queue-poll.{PROJECT}.{TEAM}.out</string>
+  <key>StandardErrorPath</key>
+  <string>{LOG_DIR}/queue-poll.{PROJECT}.{TEAM}.err</string>
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>

@@ -1,17 +1,14 @@
-"""Root-cause fix verification: bootstrap-rendered workspace files must
-embed the canonical role SKILL.md content.
+"""Root-cause fix verification: bootstrap-rendered workspace files must keep
+the canonical role SKILL reachable without pasting its long-form body hot.
 
 Before 2026-04-24, `agent_admin_template.py` rendered AGENTS.md / CLAUDE.md
 / GEMINI.md purely from engineer.toml fields (mostly empty: `skills=[]`,
 a single-line role_details). The authoritative role contract lived in
-`core/skills/<role>/SKILL.md` (60-190 lines each) but was never consumed
-by the render pipeline — so seats launched with 10-line stub workspaces
-and didn't actually know their role.
+`core/skills/<role>/SKILL.md` but was not consumed by the render pipeline.
 
-This test pins the fix: the renderer now appends a `## Role SKILL
-(canonical)` section sourced directly from `core/skills/<role>/SKILL.md`,
-with `seat_skill_mapping.role_skill_for_seat` handling the seat→role
-mapping (e.g. `memory -> memory-oracle`, `builder-1 -> builder`).
+MP008 keeps that role mapping but slims the hot prompt: generated workspaces
+now append a compact role skill hot contract that references the full
+`core/skills/<role>/SKILL.md` instead of embedding every detailed section.
 """
 from __future__ import annotations
 
@@ -129,11 +126,42 @@ def test_load_role_skill_content_role_hint_falls_back_when_skill_missing(tmp_pat
     assert "Builder fallback" in body
 
 
+def test_load_role_skill_content_role_hint_alias_wins_for_dynamic_team_prefix(tmp_path: Path) -> None:
+    """A team slug can contain role words; the engineer role_hint remains authoritative."""
+    (tmp_path / "core" / "skills" / "planner").mkdir(parents=True)
+    (tmp_path / "core" / "skills" / "planner" / "SKILL.md").write_text("# Planner alias\n", encoding="utf-8")
+    (tmp_path / "core" / "skills" / "builder").mkdir(parents=True)
+    (tmp_path / "core" / "skills" / "builder" / "SKILL.md").write_text("# Builder wrong prefix\n", encoding="utf-8")
+
+    info = agent_admin_template._load_role_skill_content(
+        tmp_path,
+        "builder-tools-planner",
+        role_hint="planner-dispatcher",
+    )
+    assert info is not None
+    role, body = info
+    assert role == "planner"
+    assert "Planner alias" in body
+
+
+def test_load_role_skill_content_unknown_role_hint_falls_back_to_seat_id(tmp_path: Path) -> None:
+    (tmp_path / "core" / "skills" / "clawseat").mkdir(parents=True)
+    (tmp_path / "core" / "skills" / "clawseat" / "SKILL.md").write_text("# Generic\n", encoding="utf-8")
+    (tmp_path / "core" / "skills" / "builder").mkdir(parents=True)
+    (tmp_path / "core" / "skills" / "builder" / "SKILL.md").write_text("# Builder seat\n", encoding="utf-8")
+
+    info = agent_admin_template._load_role_skill_content(tmp_path, "builder-2", role_hint="specialist")
+    assert info is not None
+    role, body = info
+    assert role == "builder"
+    assert "Builder seat" in body
+
+
 def test_role_skill_section_lines_empty_when_missing(tmp_path: Path) -> None:
     assert agent_admin_template._role_skill_section_lines(tmp_path, "unknown-seat") == []
 
 
-def test_role_skill_section_lines_contains_canonical_header(tmp_path: Path) -> None:
+def test_role_skill_section_lines_contains_hot_contract_and_reference(tmp_path: Path) -> None:
     skill_dir = tmp_path / "core" / "skills" / "reviewer"
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text(
@@ -141,10 +169,16 @@ def test_role_skill_section_lines_contains_canonical_header(tmp_path: Path) -> N
         encoding="utf-8",
     )
     lines = agent_admin_template._role_skill_section_lines(tmp_path, "reviewer")
-    assert "## Role SKILL (canonical)" in lines
+    assert "## Role SKILL hot contract (canonical)" in lines
     joined = "\n".join(lines)
     assert "core/skills/reviewer/SKILL.md" in joined
-    assert "Verdict rules here." in joined
+    assert "full Role SKILL" in joined
+    assert "Verdict rules here." not in joined
+    assert "complete_handoff.py --source <exact current seat>" in joined
+    assert "source=<exact planner seat>" in joined
+    assert "review/latest" in joined
+    hot_rules = [line for line in lines if line.startswith("- ")]
+    assert len(hot_rules) == 8
 
 
 # ── integration with the real repo's core/skills ──────────────────────
@@ -176,20 +210,36 @@ def test_real_repo_role_skills_load_for_canonical_seats(seat_id: str, expected_r
 
 
 def test_real_repo_role_skill_section_for_patrol_includes_contract_marker() -> None:
-    """Pin a distinctive patrol SKILL.md marker so deleting the contract fails this test."""
+    """Patrol gets the same compact hot contract while keeping its SKILL referenced."""
     lines = agent_admin_template._role_skill_section_lines(_REPO, "patrol")
     joined = "\n".join(lines)
-    assert "## Role SKILL (canonical)" in joined
-    # Patrol contract must carry the no-author-new-tests constraint
-    assert "不写新 tests" in joined or "write new tests" in joined.lower()
+    assert "## Role SKILL hot contract (canonical)" in joined
+    assert "core/skills/patrol/SKILL.md" in joined
+    assert "Source of truth: queue files" in joined
+    assert "tmux/watchdog captures are observations" in joined
+    # Detailed patrol-only prose stays in the cold SKILL reference.
+    assert "不写新 tests" not in joined
 
 
 def test_real_repo_role_skill_section_for_planner_includes_contract_marker() -> None:
     lines = agent_admin_template._role_skill_section_lines(_REPO, "planner")
     joined = "\n".join(lines)
-    assert "## Role SKILL (canonical)" in joined
-    # Planner is dispatcher; SKILL.md states identity constraint
-    assert "planner" in joined.lower()
-    # Should be non-trivial in size (>500 chars embedded)
+    assert "## Role SKILL hot contract (canonical)" in joined
+    assert "core/skills/planner/SKILL.md" in joined
+    assert "dispatch_task.py" in joined
+    assert "complete_handoff.py --source <exact current seat>" in joined
+    assert "source=<exact planner seat>" in joined
+    assert "review/latest" in joined
+    assert "planner delivers branch/commit evidence" in joined
+    assert "memory integrates accepted work" in joined
+    assert "builders never merge it or `main`" in joined
+    assert "explicit user confirmation" in joined
+    assert "failed, bounced, or reset queues are blocked" in joined
+    hot_rules = [line for line in lines if line.startswith("- ")]
+    assert len(hot_rules) == 8
+    assert "## Workflow Authoring" not in joined
+    stale_generic = "complete_handoff.py --source " + "planner"
+    assert stale_generic not in joined
+    # Compact hot contract should remain meaningful but not paste full SKILL.md.
     embedded_size = len(joined)
-    assert embedded_size > 500, f"planner workspace embed unexpectedly small: {embedded_size}"
+    assert 500 < embedded_size < 2500, f"planner workspace hot contract size out of budget: {embedded_size}"

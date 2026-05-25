@@ -27,4 +27,4 @@ See [core/references/handoff-receipt-protocol.md](../../references/handoff-recei
 Note: patrol 主线 cron-driven scan + `[PATROL-NOTIFY]` finding emit 不受此规则约束; 此规则仅适用于 patrol 接收 workflow.md 派工 task 时。
 ## Context Management
 See [core/references/context-management-protocol.md](../../references/context-management-protocol.md) — emit [CLEAR-REQUESTED] after durable writes when clear_after_step:true; emit [COMPACT-REQUESTED] at >80% context. Exactly one marker as final line.
-## Borrowed Practices / Operator Language Matching: see [`core/references/superpowers-borrowed/`](../../references/superpowers-borrowed/); match last 3 operator messages; keep technical terms, commands, and paths literal.
+## Operator Language Matching: match last 3 operator messages; keep technical terms, commands, paths, and evidence IDs literal.

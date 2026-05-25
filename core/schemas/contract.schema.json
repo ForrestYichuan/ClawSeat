@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "clawseat://schemas/contract.schema.json",
+  "title": "ClawSeat v3 contract (runtime + snapshot frontmatter)",
+  "description": "Cross-team interface contract. Runtime SSOT in repo source tree; published snapshot under tasks/<p>/contracts/<name>__v<ver>/published.yaml. See spec §4.6.",
+  "type": "object",
+  "required": [
+    "contract_name",
+    "version",
+    "owner_team",
+    "status"
+  ],
+  "properties": {
+    "contract_name": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9_]*$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$",
+      "description": "Semver major.minor.patch"
+    },
+    "owner_team": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["draft", "published", "deprecated"]
+    },
+    "published_ts": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "consumers": {
+      "type": "array",
+      "items": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"}
+    },
+    "contract_type": {
+      "type": "string",
+      "enum": ["data", "rpc", "event", "dsl"],
+      "description": "DSL contracts trigger §4.6.4 P8 prototype gate."
+    },
+    "sample_data": {
+      "type": "array",
+      "description": "At least one sample per primitive; required for DSL contracts."
+    },
+    "schema_definition": {
+      "type": "string",
+      "description": "Free-form schema definition (proto / openapi / json-schema embedded)."
+    },
+    "prototype_log": {
+      "type": "array",
+      "description": "Required when contract_type=dsl. Records consumer-team trial-write feedback before v1.0 publish.",
+      "items": {
+        "type": "object",
+        "required": ["ts", "consumer_team", "primitives_tested", "verdict"],
+        "properties": {
+          "ts": {"type": "string", "format": "date-time"},
+          "consumer_team": {"type": "string"},
+          "primitives_tested": {"type": "array", "items": {"type": "string"}},
+          "verdict": {"type": "string", "enum": ["sufficient", "missing-primitive", "buggy"]},
+          "feedback": {"type": "string"}
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"contract_type": {"const": "dsl"}}, "required": ["contract_type"]},
+      "then": {
+        "required": ["prototype_log", "sample_data"],
+        "description": "DSL contracts MUST carry prototype_log and sample_data per §4.6.4 P8"
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "published"}}, "required": ["status"]},
+      "then": {
+        "required": ["published_ts", "consumers"],
+        "description": "published contracts must declare publish time and consumer list"
+      }
+    }
+  ]
+}

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import shutil
@@ -61,6 +62,7 @@ from agent_admin_info import InfoHandlers, InfoHooks
 # (audit H8): a top-level import forced the runtime path to pull in migration
 # code on every invocation, so any bug there leaked into normal operation.
 from agent_admin_parser import ParserHooks, build_parser as build_agent_admin_parser
+from agent_admin_provider import ProviderHandlers
 from agent_admin_runtime import (
     common_env,
     detect_macos_system_proxies,
@@ -83,6 +85,28 @@ from agent_admin_task import auto_supersede as task_auto_supersede
 from agent_admin_task import create_task as task_create
 from agent_admin_task import list_pending as task_list_pending
 from agent_admin_task import update_status as task_update_status
+
+# v3 brief / queue subcommand wiring (spec §4.2 §4.3)
+from agent_admin_brief import cmd_queue as brief_queue
+from agent_admin_brief import cmd_list as brief_list
+from agent_admin_brief import cmd_claim as brief_claim
+from agent_admin_brief import cmd_reset as brief_reset
+from agent_admin_brief import cmd_requeue as brief_requeue
+from agent_admin_brief import cmd_start as brief_start
+from agent_admin_brief import cmd_show as brief_show
+from agent_admin_brief import cmd_done as brief_done
+from agent_admin_brief import cmd_planner_status as brief_planner_status
+from liveness_gate import query_seat_liveness
+
+# v3 acceptance executor (Phase 2, spec §4.7)
+_CORE_LIB_PATH = REPO_ROOT / "core" / "lib"
+if str(_CORE_LIB_PATH) not in sys.path:
+    sys.path.insert(0, str(_CORE_LIB_PATH))
+from acceptance_executor import (  # noqa: E402
+    AcceptanceError as _AcceptanceError,
+    aggregate_verdict as _aggregate_verdict,
+    run_acceptance as _run_acceptance,
+)
 from agent_admin_template import TemplateHandlers, TemplateHooks
 from agent_admin_tui import TuiHooks, run_tui_app
 from agent_admin_window import (
@@ -179,6 +203,9 @@ class Project:
 
 class AgentAdminError(RuntimeError):
     pass
+
+
+PROVIDER_HANDLERS = ProviderHandlers(AgentAdminError)
 
 
 def ensure_dir(path: Path) -> None:
@@ -734,6 +761,30 @@ def cmd_list_identities(args: argparse.Namespace) -> int:
     return INFO_HANDLERS.list_identities(args)
 
 
+def cmd_provider_list(args: argparse.Namespace) -> int:
+    return PROVIDER_HANDLERS.list(args)
+
+
+def cmd_provider_get(args: argparse.Namespace) -> int:
+    return PROVIDER_HANDLERS.get(args)
+
+
+def cmd_provider_add(args: argparse.Namespace) -> int:
+    return PROVIDER_HANDLERS.add(args)
+
+
+def cmd_provider_update(args: argparse.Namespace) -> int:
+    return PROVIDER_HANDLERS.update(args)
+
+
+def cmd_provider_remove(args: argparse.Namespace) -> int:
+    return PROVIDER_HANDLERS.remove(args)
+
+
+def cmd_provider_rename(args: argparse.Namespace) -> int:
+    return PROVIDER_HANDLERS.rename(args)
+
+
 def cmd_run_engineer(args: argparse.Namespace) -> int:
     return INFO_HANDLERS.run_engineer(args)
 
@@ -847,6 +898,29 @@ def cmd_seat_resume(args: argparse.Namespace) -> int:
     return COMMAND_HANDLERS.seat_resume(args)
 
 
+def cmd_seat_liveness(args: argparse.Namespace) -> int:
+    rows = query_seat_liveness(args.project, max_age_seconds=args.max_age_seconds)
+    if args.seat:
+        rows = [
+            row for row in rows
+            if row.get("seat_id") == args.seat
+            or row.get("role") == args.seat
+            or row.get("session_name") == args.seat
+        ]
+    if args.as_json:
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
+        return 0
+    if not rows:
+        print(f"no live seats for project {args.project}")
+        return 0
+    for row in rows:
+        print(
+            f"{row.get('role', '-')}\t{row.get('session_name', '-')}\t"
+            f"{row.get('status', '-')}\t{row.get('last_heartbeat_ts', '-')}"
+        )
+    return 0
+
+
 def cmd_project_resume(args: argparse.Namespace) -> int:
     return COMMAND_HANDLERS.project_resume(args)
 
@@ -931,6 +1005,11 @@ SWITCH_HANDLERS = SwitchHandlers(
         session_stop_engineer=session_stop_engineer,
         session_record_cls=SessionRecord,
         normalize_name=normalize_name,
+        engineer_path=engineer_path,
+        load_engineer=load_engineer,
+        write_engineer=write_engineer,
+        create_engineer_profile=create_engineer_profile,
+        create_session_record=create_session_record,
     )
 )
 
@@ -1161,6 +1240,90 @@ def cmd_task_update_status(args: argparse.Namespace) -> int:
     return task_update_status(args)
 
 
+def cmd_brief_queue(args: argparse.Namespace) -> int:
+    return brief_queue(args)
+
+
+def cmd_brief_list(args: argparse.Namespace) -> int:
+    return brief_list(args)
+
+
+def cmd_brief_claim(args: argparse.Namespace) -> int:
+    return brief_claim(args)
+
+
+def cmd_brief_reset(args: argparse.Namespace) -> int:
+    return brief_reset(args)
+
+
+def cmd_brief_requeue(args: argparse.Namespace) -> int:
+    return brief_requeue(args)
+
+
+def cmd_brief_start(args: argparse.Namespace) -> int:
+    return brief_start(args)
+
+
+def cmd_brief_show(args: argparse.Namespace) -> int:
+    return brief_show(args)
+
+
+def cmd_brief_done(args: argparse.Namespace) -> int:
+    return brief_done(args)
+
+
+def cmd_brief_planner_status(args: argparse.Namespace) -> int:
+    return brief_planner_status(args)
+
+
+def cmd_acceptance_run(args: argparse.Namespace) -> int:
+    baseline_raw = getattr(args, "baseline_criteria", None) or ""
+    baseline_indices: set[int] = set()
+    for token in baseline_raw.split(","):
+        token = token.strip()
+        if token:
+            try:
+                baseline_indices.add(int(token))
+            except ValueError:
+                print(f"warn: invalid --baseline-criteria token {token!r}; skipping", file=sys.stderr)
+    try:
+        results = _run_acceptance(
+            project=args.project,
+            team=args.team,
+            task_id=args.task_id,
+            brief_path=Path(args.brief_path) if args.brief_path else None,
+            reviewer_seat=args.reviewer_seat,
+            cwd=Path(args.cwd) if args.cwd else None,
+            profile_path=Path(args.profile) if getattr(args, "profile", None) else None,
+            baseline_indices=baseline_indices or None,
+        )
+    except _AcceptanceError as exc:
+        print(f"acceptance schema error: {exc}", file=sys.stderr)
+        return 2
+    verdict = _aggregate_verdict(results)
+    for route, r in results.items():
+        passed = sum(1 for i in r.items if i.result == "pass")
+        failed = sum(1 for i in r.items if i.result == "fail")
+        pending = sum(1 for i in r.items if i.result == "pending")
+        diagnostic = sum(1 for i in r.items if i.result == "diagnostic")
+        diag_suffix = f" diagnostic={diagnostic}" if diagnostic else ""
+        print(f"{route}: {r.verdict} (pass={passed} fail={failed} pending={pending}{diag_suffix})")
+    print(f"aggregate: {verdict}")
+    if verdict == "PASS" and not getattr(args, "skip_queue_done", False):
+        done_rc = brief_done(
+            argparse.Namespace(
+                project=args.project,
+                team=args.team,
+                task_id=args.task_id,
+                actor=args.actor,
+                verdict="PASS",
+            )
+        )
+        if done_rc != 0:
+            return done_rc
+    return 1 if verdict == "FAIL" else 0
+
+
 def cmd_window_config_monitor(args: argparse.Namespace) -> int:
     project = load_project_or_current(args.project)
     engineers = [normalize_name(item) for item in args.engineers.split(",") if item.strip()]
@@ -1186,6 +1349,12 @@ PARSER_HOOKS = ParserHooks(
     cmd_list_projects=cmd_list_projects,
     cmd_list_engineers=cmd_list_engineers,
     cmd_list_identities=cmd_list_identities,
+    cmd_provider_list=cmd_provider_list,
+    cmd_provider_get=cmd_provider_get,
+    cmd_provider_add=cmd_provider_add,
+    cmd_provider_update=cmd_provider_update,
+    cmd_provider_remove=cmd_provider_remove,
+    cmd_provider_rename=cmd_provider_rename,
     cmd_show_project=cmd_show_project,
     cmd_show_engineer=cmd_show_engineer,
     cmd_show=cmd_show,
@@ -1197,6 +1366,7 @@ PARSER_HOOKS = ParserHooks(
     cmd_session_name=cmd_session_name,
     cmd_project_open=cmd_project_open,
     cmd_seat_resume=cmd_seat_resume,
+    cmd_seat_liveness=cmd_seat_liveness,
     cmd_project_current=cmd_project_current,
     cmd_project_use=cmd_project_use,
     cmd_project_create=cmd_project_create,
@@ -1241,6 +1411,16 @@ PARSER_HOOKS = ParserHooks(
     cmd_task_auto_supersede=cmd_task_auto_supersede,
     cmd_task_list_pending=cmd_task_list_pending,
     cmd_task_update_status=cmd_task_update_status,
+    cmd_brief_queue=cmd_brief_queue,
+    cmd_brief_list=cmd_brief_list,
+    cmd_brief_claim=cmd_brief_claim,
+    cmd_brief_reset=cmd_brief_reset,
+    cmd_brief_requeue=cmd_brief_requeue,
+    cmd_brief_start=cmd_brief_start,
+    cmd_brief_show=cmd_brief_show,
+    cmd_brief_done=cmd_brief_done,
+    cmd_brief_planner_status=cmd_brief_planner_status,
+    cmd_acceptance_run=cmd_acceptance_run,
     cmd_tui=cmd_tui,
     cmd_project_koder_bind=cmd_project_koder_bind,
     cmd_machine_memory_show=cmd_machine_memory_show,

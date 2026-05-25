@@ -271,6 +271,53 @@ def test_switch_harness_ark_seeds_per_engineer_secret_from_shared(tmp_path: Path
     assert writes and writes[0].secret_file == str(target)
 
 
+def test_switch_harness_deepseek_seeds_per_engineer_secret_from_shared(tmp_path: Path) -> None:
+    fake_home = tmp_path / "home"
+    shared = fake_home / ".local" / "share" / "agent-launcher" / "secrets" / "claude" / "deepseek.env"
+    shared.parent.mkdir(parents=True, exist_ok=True)
+    shared.write_text(
+        "DEEPSEEK_API_KEY=sk-deepseek-shared\n"
+        "DEEPSEEK_BASE_URL=https://api.deepseek.com/anthropic\n"
+        "DEEPSEEK_MODEL=deepseek-v4-pro[1M]\n",
+        encoding="utf-8",
+    )
+
+    old_session = SimpleNamespace(
+        engineer_id="planner",
+        project="install",
+        tool="claude",
+        auth_mode="api",
+        provider="minimax",
+        identity="claude.api.minimax.install.planner",
+        workspace=str(tmp_path / "workspace" / "planner"),
+        runtime_dir=str(tmp_path / "runtime" / "planner"),
+        session="install-planner-claude",
+        bin_path="claude",
+        monitor=True,
+        legacy_sessions=[],
+        launch_args=[],
+        secret_file=str(fake_home / ".agents" / "secrets" / "claude" / "minimax" / "planner.env"),
+        wrapper="",
+    )
+    handlers, writes = _make_switch_handlers(fake_home, old_session)
+
+    result = handlers.session_switch_harness(
+        SimpleNamespace(
+            project="install",
+            engineer="planner",
+            tool="claude",
+            mode="api",
+            provider="deepseek",
+            model="",
+        )
+    )
+
+    assert result == 0
+    target = fake_home / ".agents" / "secrets" / "claude" / "deepseek" / "planner.env"
+    assert target.read_text(encoding="utf-8") == shared.read_text(encoding="utf-8")
+    assert writes and writes[0].secret_file == str(target)
+
+
 def test_switch_harness_ark_does_not_overwrite_existing_per_engineer_secret(tmp_path: Path) -> None:
     fake_home = tmp_path / "home"
     shared = fake_home / ".agent-runtime" / "secrets" / "claude" / "ark.env"

@@ -5,12 +5,19 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[1]
 _SCRIPTS = _REPO / "core" / "skills" / "gstack-harness" / "scripts"
 _DISPATCH = _SCRIPTS / "dispatch_task.py"
 _COMPLETE = _SCRIPTS / "complete_handoff.py"
+
+sys.path.insert(0, str(_REPO / "core" / "lib"))
+sys.path.insert(0, str(_SCRIPTS))
+
+from complete_handoff import complete_v3_brief_queue_if_possible  # noqa: E402
+from queue_io import append_event, read_current_state  # noqa: E402
 
 
 def _run(*cmd: str, cwd: Path | str | None = None) -> subprocess.CompletedProcess[str]:
@@ -228,6 +235,168 @@ def test_completion_accepts_required_closure_fields_when_available(tmp_path: Pat
     assert receipt["ci_conclusion"] == "success"
 
 
+def test_completion_syncs_matching_v3_brief_queue(tmp_path: Path) -> None:
+    tasks_root = tmp_path / "tasks"
+    queue = tasks_root / "team-a" / "tasks.queue.jsonl"
+    profile_path = tmp_path / "profile.toml"
+    profile_path.write_text(
+        f"""profile_name = "p-profile"
+project_name = "p"
+tasks_root = "{tasks_root}"
+
+[teams]
+team-a = {{ seats = ["team-a-planner"] }}
+
+[seat_overrides.team-a-planner]
+tool = "claude"
+""",
+        encoding="utf-8",
+    )
+    append_event(
+        queue,
+        {
+            "event_type": "task_created",
+            "actor": "memory",
+            "task_id": "T1",
+            "brief_path": "tasks/p/team-a/brief/T1.md",
+            "parent_task_id": None,
+            "depends_on": [],
+        },
+    )
+    append_event(
+        queue,
+        {"event_type": "task_claimed", "actor": "planner@claude", "task_id": "T1"},
+    )
+    profile = SimpleNamespace(
+        profile_path=profile_path,
+        tasks_root=tasks_root,
+        seat_overrides={"team-a-planner": {"tool": "claude"}},
+    )
+
+    synced = complete_v3_brief_queue_if_possible(
+        profile,
+        seat="team-a-planner",
+        task_id="T1",
+        status="completed",
+        verdict="PASS",
+        summary="done",
+    )
+
+    assert synced == queue
+    state = read_current_state(queue)
+    assert state["T1"].status == "task_done"
+    assert state["T1"].verdict == "PASS"
+
+
+def test_completion_syncs_investigation_verdict_to_v3_queue(tmp_path: Path) -> None:
+    tasks_root = tmp_path / "tasks"
+    queue = tasks_root / "team-a" / "tasks.queue.jsonl"
+    profile_path = tmp_path / "profile.toml"
+    profile_path.write_text(
+        f"""profile_name = "p-profile"
+project_name = "p"
+tasks_root = "{tasks_root}"
+
+[teams]
+team-a = {{ seats = ["team-a-planner"] }}
+
+[seat_overrides.team-a-planner]
+tool = "claude"
+""",
+        encoding="utf-8",
+    )
+    append_event(
+        queue,
+        {
+            "event_type": "task_created",
+            "actor": "memory",
+            "task_id": "T2",
+            "brief_path": "tasks/p/team-a/brief/T2.md",
+            "parent_task_id": None,
+            "depends_on": [],
+        },
+    )
+    append_event(
+        queue,
+        {"event_type": "task_claimed", "actor": "planner@claude", "task_id": "T2"},
+    )
+    profile = SimpleNamespace(
+        profile_path=profile_path,
+        tasks_root=tasks_root,
+        seat_overrides={"team-a-planner": {"tool": "claude"}},
+    )
+
+    synced = complete_v3_brief_queue_if_possible(
+        profile,
+        seat="team-a-planner",
+        task_id="T2",
+        status="completed",
+        verdict="INVESTIGATED",
+        summary="investigated",
+    )
+
+    assert synced == queue
+    assert read_current_state(queue)["T2"].status == "task_done"
+
+
+def test_completion_syncs_reset_v3_brief_queue(tmp_path: Path) -> None:
+    tasks_root = tmp_path / "tasks"
+    queue = tasks_root / "team-a" / "tasks.queue.jsonl"
+    profile_path = tmp_path / "profile.toml"
+    profile_path.write_text(
+        f"""profile_name = "p-profile"
+project_name = "p"
+tasks_root = "{tasks_root}"
+
+[teams]
+team-a = {{ seats = ["team-a-planner"] }}
+
+[seat_overrides.team-a-planner]
+tool = "claude"
+""",
+        encoding="utf-8",
+    )
+    append_event(
+        queue,
+        {
+            "event_type": "task_created",
+            "actor": "memory",
+            "task_id": "T3",
+            "brief_path": "tasks/p/team-a/brief/T3.md",
+            "parent_task_id": None,
+            "depends_on": [],
+        },
+    )
+    append_event(
+        queue,
+        {
+            "event_type": "task_reset",
+            "actor": "memory",
+            "task_id": "T3",
+            "reset_reason": "acceptance criteria repaired",
+        },
+    )
+    profile = SimpleNamespace(
+        profile_path=profile_path,
+        tasks_root=tasks_root,
+        seat_overrides={"team-a-planner": {"tool": "claude"}},
+    )
+
+    synced = complete_v3_brief_queue_if_possible(
+        profile,
+        seat="team-a-planner",
+        task_id="T3",
+        status="completed",
+        verdict="PASS",
+        summary="done after reset",
+    )
+
+    assert synced == queue
+    state = read_current_state(queue)
+    assert state["T3"].status == "task_done"
+    assert state["T3"].verdict == "PASS"
+
+
 def test_completion_without_branch_fields_fails_when_expected_base_present(tmp_path: Path) -> None:
     repo = _init_git_repo(tmp_path)
     profile, handoffs, _ = _write_profile(tmp_path, repo)
@@ -295,7 +464,13 @@ def test_completion_missing_ci_conclusion_fails(tmp_path: Path) -> None:
     assert "ci_conclusion" in result.stderr
 
 
-def test_completion_rejects_stale_branch_base_against_expected(tmp_path: Path) -> None:
+def test_completion_soft_fails_stale_branch_base_against_expected(tmp_path: Path) -> None:
+    """v3 spec §10 item 6: branch_base mismatch is now a soft-fail (warning +
+    lineage_status=divergent), not SystemExit. Earlier hard-fail blocked
+    AL-503 planner→memory fan-in. Memory PASS_NEEDS_INTEGRATION handler
+    recovers downstream (spec §C / DO spec)."""
+    import json as _json
+
     repo = _init_git_repo(tmp_path)
     profile, _, _ = _write_profile(tmp_path, repo)
 
@@ -315,8 +490,21 @@ def test_completion_rejects_stale_branch_base_against_expected(tmp_path: Path) -
     subprocess.run(["git", "-C", str(repo), "update-ref", "refs/remotes/clawseat/main", head], check=True)
 
     result = _complete(profile, "C5", branch="main", pr_number="101", ci_conclusion="success")
-    assert result.returncode != 0
+    # Receipt now emitted (returncode 0) with warning on stderr.
+    assert result.returncode == 0, f"expected soft-fail success, got: {result.stderr}"
     assert "branch_base mismatch" in result.stderr
+    # PASS_NEEDS_INTEGRATION signal must appear so memory's handler routes recovery.
+    assert "PASS_NEEDS_INTEGRATION" in result.stderr, (
+        "soft-fail must surface PASS_NEEDS_INTEGRATION hint so memory "
+        "handler can route recovery (spec §C / DO spec)"
+    )
+    # Verify receipt records the divergent lineage so downstream (memory) can
+    # route via PASS_NEEDS_INTEGRATION.
+    receipt_path = tmp_path / "handoffs" / "C5__builder__planner.json"
+    assert receipt_path.exists()
+    receipt = _json.loads(receipt_path.read_text(encoding="utf-8"))
+    assert receipt.get("lineage_status") == "divergent"
+    assert receipt.get("head_contains_commit") is False
 
 
 def test_completion_legacy_without_expected_base_skips_validation(tmp_path: Path) -> None:

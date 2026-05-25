@@ -49,7 +49,20 @@ def _store_handlers(tmp_path: Path) -> StoreHandlers:
     )
 
 
-def _switch_handlers(tmp_path: Path, writes: list[tuple[str, list[str], str]] | None = None) -> SwitchHandlers:
+def _switch_handlers(
+    tmp_path: Path,
+    writes: list[tuple[str, list[str], str]] | None = None,
+    applies: list[tuple[str, str, str]] | None = None,
+    old_session: SimpleNamespace | None = None,
+) -> SwitchHandlers:
+    def record_write(session):
+        if writes is not None:
+            writes.append((session.engineer_id, list(session.launch_args), session.bin_path))
+
+    def record_apply_template(session, project):
+        if applies is not None:
+            applies.append((session.engineer_id, session.tool, project.name))
+
     return SwitchHandlers(
         SwitchHooks(
             error_cls=RuntimeError,
@@ -68,11 +81,9 @@ def _switch_handlers(tmp_path: Path, writes: list[tuple[str, list[str], str]] | 
             parse_env_file=lambda path: {},
             load_project=lambda name: SimpleNamespace(name=name),
             load_project_or_current=lambda name: SimpleNamespace(name=name or "install"),
-            load_session=lambda project, engineer: None,
-            write_session=lambda session: writes.append((session.engineer_id, list(session.launch_args), session.bin_path))
-            if writes is not None
-            else None,
-            apply_template=lambda session, project: None,
+            load_session=lambda project, engineer: old_session,
+            write_session=record_write,
+            apply_template=record_apply_template,
             session_stop_engineer=lambda session: None,
             session_record_cls=SimpleNamespace,
             normalize_name=lambda value: value,
@@ -140,6 +151,50 @@ def test_switch_harness_rewrites_launch_args_for_new_tool(tmp_path):
 
     assert new_session.launch_args == DEFAULT_TOOL_ARGS["codex"]
     assert new_session.bin_path == TOOL_BINARIES["codex"]
+
+
+@pytest.mark.parametrize(
+    ("tool", "mode", "provider"),
+    [
+        ("claude", "oauth", "anthropic"),
+        ("codex", "oauth", "openai"),
+        ("gemini", "oauth", "google"),
+    ],
+)
+def test_switch_harness_rerenders_workspace_for_target_tool(tmp_path, tool, mode, provider):
+    applies: list[tuple[str, str, str]] = []
+    old_session = SimpleNamespace(
+        engineer_id="memory",
+        project="install",
+        tool="claude",
+        auth_mode="api",
+        provider="minimax",
+        identity="claude.api.minimax.install.memory",
+        workspace=str(tmp_path / "workspaces" / "install" / "memory"),
+        runtime_dir=str(tmp_path / "runtime" / "claude"),
+        session="install-memory-claude",
+        bin_path=TOOL_BINARIES["claude"],
+        monitor=True,
+        legacy_sessions=[],
+        launch_args=["--dangerously-skip-permissions"],
+        secret_file=str(tmp_path / "old.env"),
+        wrapper="",
+    )
+    handlers = _switch_handlers(tmp_path, applies=applies, old_session=old_session)
+
+    result = handlers.session_switch_harness(
+        SimpleNamespace(
+            project="install",
+            engineer="memory",
+            tool=tool,
+            mode=mode,
+            provider=provider,
+            model="",
+        )
+    )
+
+    assert result == 0
+    assert applies == [("memory", tool, "install")]
 
 
 def test_reconcile_session_runtime_repairs_stale_codex_launch_args(tmp_path):

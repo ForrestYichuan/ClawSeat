@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from functools import lru_cache
 from pathlib import Path
 
 import pytest
@@ -28,6 +29,139 @@ for _p in _EXTRA_PATHS:
 
 from _task_io import write_todo  # noqa: E402
 from migrate_profile import build_lines  # noqa: E402
+
+
+# ── Test suite layering ─────────────────────────────────────────────────
+
+# Files that require Python 3.11+ (tomllib, slots=True, X | Y type union syntax).
+# Silently skip collection on older runtimes rather than failing the whole suite.
+if sys.version_info < (3, 11):
+    collect_ignore_glob = [
+        "test_install_qa_gaps.py",
+        "test_launch_permissions.py",
+        "test_memory_extract_links.py",
+        "test_migrate_seat_auth.py",
+        "test_multi_team_intake.py",
+        "test_multi_team_minimal_seed.py",
+        "test_openclaw_migrated_skills_registered.py",
+        "test_patrol_codex_rewake.py",
+        "test_patrol_stale_handoff_detect.py",
+        "test_patrol_stale_handoff_rewake.py",
+        "test_preflight.py",
+        "test_preflight_gstack_severity.py",
+        "test_preflight_profile_aware.py",
+        "test_sandbox_home_symlink.py",
+        "test_seat_clear_watchdog.py",
+        "test_token_watermark.py",
+    ]
+
+HOST_TEST_FILES = {
+    "test_feishu_enabled_switch.py",
+    "test_heartbeat.py",
+    "test_install_python_selection.py",
+    "test_lark_cli_wrapper.py",
+    "test_modal_detector.py",
+    "test_openclaw_koder_workspace.py",
+    "test_planner_announce.py",
+    "test_scan_project_smoke.py",
+    "test_seat_resolver_alias.py",
+}
+
+SLOW_TEST_FILES = {
+    "test_ark_provider_support.py",
+    "test_install_ancestor_patrol_plist.py",
+    "test_install_auto_kickoff.py",
+    "test_install_lazy_panes.py",
+    "test_install_memory_singleton.py",
+    "test_install_migrate_template_driven.py",
+    "test_install_mirror_openclaw_skills.py",
+    "test_install_pending_seats_dynamic.py",
+    "test_install_phase_ready_early_exit.py",
+    "test_install_post_bootstrap_profile_present.py",
+    "test_install_privacy_setup.py",
+    "test_install_provider_noninteractive.py",
+    "test_install_repo_root_override.py",
+    "test_install_seed_template_driven.py",
+    "test_install_skill_symlinks.py",
+    "test_install_template_flag.py",
+    "test_pre_commit_privacy_hook.py",
+    "test_check_engineer_status_working_detection.py",
+    "test_launcher_oauth_host_env_preserve.py",
+    "test_memory_stop_hook.py",
+    "test_recover_grid_pty_warning.py",
+    "test_recover_grid_worker_check.py",
+    "test_scan_machine_subset.py",
+    "test_send_notify_simplified.py",
+    "test_send_and_verify_idle_wait.py",
+    "test_session_stability_window.py",
+    "test_skill_tier_registration.py",
+    "test_skills_visible_to_all_tools.py",
+    "test_seat_session_status_line.py",
+    "test_template_clawseat_creative.py",
+    "test_wait_for_text_target.py",
+    "test_wait_for_seat_rejects_stale_tool.py",
+    "test_xcode_best_provider_support.py",
+}
+
+SLOW_NODEID_PARTS = (
+    "test_memory_oracle.py::TestScan",
+)
+
+LEGACY_NAME_PARTS = (
+    "legacy",
+    "deprecated",
+    "retired",
+    "compat",
+    "dead_code",
+    "dead-code",
+)
+
+SCRIPT_MARKER_TOKENS = (
+    "subprocess.run(",
+    "subprocess.check_output(",
+    "Popen(",
+    "install.sh",
+    "tmux",
+    "osascript",
+)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line("markers", "host: requires local workstation state")
+    config.addinivalue_line("markers", "slow: process-heavy or intentionally waits")
+    config.addinivalue_line("markers", "legacy: deprecated compatibility surface")
+    config.addinivalue_line("markers", "script: shell/CLI/subprocess surface")
+
+
+@lru_cache(maxsize=None)
+def _test_file_text(path: str) -> str:
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    for item in items:
+        path = Path(str(item.fspath))
+        name = path.name
+        rel = path.relative_to(REPO_ROOT).as_posix() if path.is_relative_to(REPO_ROOT) else path.as_posix()
+        lower_name = name.lower()
+        text = _test_file_text(str(path))
+
+        if rel.startswith("tests/e2e/") or name in HOST_TEST_FILES:
+            item.add_marker(pytest.mark.host)
+        if (
+            name.startswith("test_install_")
+            or name in SLOW_TEST_FILES
+            or any(part in item.nodeid for part in SLOW_NODEID_PARTS)
+        ):
+            item.add_marker(pytest.mark.slow)
+        lower_nodeid = item.nodeid.lower()
+        if any(part in lower_name or part in lower_nodeid for part in LEGACY_NAME_PARTS):
+            item.add_marker(pytest.mark.legacy)
+        if any(token in text for token in SCRIPT_MARKER_TOKENS):
+            item.add_marker(pytest.mark.script)
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────

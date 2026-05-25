@@ -2,12 +2,13 @@ from pathlib import Path
 
 
 def test_architecture_has_solo_callout() -> None:
-    """ARCHITECTURE.md contains clawseat-solo 3-seat callout."""
+    """ARCHITECTURE.md documents clawseat-solo as a v3 minimal alias."""
     content = Path("docs/ARCHITECTURE.md").read_text(encoding="utf-8")
-    heading = "### Solo Template (Minimal 3-Seat)"
+    heading = "### Solo Alias (Minimal v3 Project Group)"
     assert heading in content
     idx = content.index(heading)
     section = content[idx:idx + 800]
-    assert any(word in section.lower() for word in ["3-seat", "minimal", "three-seat"])
-    for seat in ["memory", "builder", "planner"]:
+    assert "MULTI_TEAM_MINIMAL" in section
+    assert "planner+builder" in section
+    for seat in ["project-memory", "builder", "planner", "quality-docs"]:
         assert seat in section, f"Solo callout missing seat: {seat}"

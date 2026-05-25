@@ -41,7 +41,7 @@ AskUserQuestion reference JSON:
   "options": [
     {"label": "Creative (Recommended)", "description": "Best first install default."},
     {"label": "Engineering", "description": "Adds reviewer for code review lanes."},
-    {"label": "Solo", "description": "Minimal 3-seat all-OAuth setup."}
+    {"label": "Solo", "description": "Legacy alias for v3 MULTI_TEAM_MINIMAL."}
   ]
 }
 ```

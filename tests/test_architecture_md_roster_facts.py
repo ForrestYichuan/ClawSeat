@@ -26,6 +26,10 @@ def test_architecture_project_template_roster_matches_templates() -> None:
         matching_lines = [line for line in arch.splitlines() if f"`{name}`" in line]
         assert matching_lines, f"ARCHITECTURE.md must document {name}"
         joined = "\n".join(matching_lines)
+        if name == "clawseat-solo":
+            assert "MULTI_TEAM_MINIMAL" in joined
+            assert "planner+builder" in joined
+            continue
         assert str(len(seats)) in joined, f"{name} count must be {len(seats)}"
         for seat in seats:
             assert seat in joined, f"{name} missing seat {seat}"
@@ -33,7 +37,7 @@ def test_architecture_project_template_roster_matches_templates() -> None:
 
 def test_architecture_template_roster_contains_three_templates() -> None:
     arch = ARCH.read_text(encoding="utf-8")
-    template_section = arch.split("### Project Templates", 1)[1].split("### Solo Template", 1)[0]
+    template_section = arch.split("### Project Templates", 1)[1].split("### Solo Alias", 1)[0]
     assert "`clawseat-engineering`" in template_section
     assert "`clawseat-creative`" in template_section
     assert "`clawseat-solo`" in template_section
@@ -43,7 +47,7 @@ def test_architecture_template_roster_contains_three_templates() -> None:
 
 def test_architecture_engineering_row_is_five_seats_with_reviewer_authority() -> None:
     arch = ARCH.read_text(encoding="utf-8")
-    template_section = arch.split("### Project Templates", 1)[1].split("### Solo Template", 1)[0]
+    template_section = arch.split("### Project Templates", 1)[1].split("### Solo Alias", 1)[0]
     row = next(line for line in template_section.splitlines() if line.startswith("| `clawseat-engineering`"))
     assert "| 5 |" in row
     assert "reviewer" in row

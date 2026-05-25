@@ -22,9 +22,11 @@ def test_install_md_documents_current_install_sh_die_codes() -> None:
         "INVALID_FLAGS",
         "INVALID_MEMORY_MODEL",
         "INVALID_MEMORY_TOOL",
+        "INVALID_MODE",
         "INVALID_PROJECT",
         "INVALID_REPO_ROOT",
         "INVALID_TEMPLATE",
+        "MISSING_SCRIPT",
         "UNKNOWN_FLAG",
     }
 

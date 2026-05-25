@@ -159,16 +159,17 @@ def test_template_switch_replaces_old_roster_and_regenerates_workspaces(tmp_path
                 "",
             ]
         ),
-        template="clawseat-solo",
+        template="clawseat-engineering",
     )
 
     assert result.returncode == 0, result.stderr
     data = tomllib.loads(project_path.read_text(encoding="utf-8"))
-    assert data["template_name"] == "clawseat-solo"
-    assert data["engineers"] == ["memory", "builder", "planner"]
-    assert data["monitor_engineers"] == ["memory", "builder", "planner"]
-    assert data["monitor_max_panes"] == 3
+    assert data["template_name"] == "clawseat-engineering"
+    assert data["engineers"] == ["memory", "planner", "builder", "reviewer", "patrol"]
+    assert data["monitor_engineers"] == ["memory", "planner", "builder", "reviewer", "patrol"]
+    assert data["monitor_max_panes"] == 5
     assert "designer" not in data["seat_overrides"]
+    assert "reviewer" in data["seat_overrides"]
 
     calls = [
         json.loads(line)["argv"]

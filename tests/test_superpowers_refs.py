@@ -2,24 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 
 _REPO = Path(__file__).resolve().parents[1]
 _BORROWED = _REPO / "core" / "references" / "superpowers-borrowed"
-
-_SKILLS = (
-    "brainstorming",
-    "writing-plans",
-    "executing-plans",
-    "test-driven-development",
-    "systematic-debugging",
-    "verification-before-completion",
-    "requesting-code-review",
-    "receiving-code-review",
-    "finishing-a-development-branch",
-    "subagent-driven-development",
-)
 
 _SEATS = (
     "memory-oracle",
@@ -31,23 +16,26 @@ _SEATS = (
 )
 
 
-def test_attribution_file_exists() -> None:
-    text = (_BORROWED / "ATTRIBUTION.md").read_text(encoding="utf-8")
-    assert "MIT License" in text
-    assert "https://github.com/obra/superpowers" in text
-    assert "Source commit: " in text
+def test_superpowers_borrowed_tree_is_not_integrated() -> None:
+    assert not _BORROWED.exists()
 
 
-@pytest.mark.parametrize("skill", _SKILLS)
-def test_all_borrowed_skills_present(skill: str) -> None:
-    path = _BORROWED / f"{skill}.md"
-    assert path.is_file(), skill
-    assert path.read_text(encoding="utf-8").strip(), skill
+def test_seat_skills_do_not_reference_superpowers() -> None:
+    for seat in _SEATS:
+        path = _REPO / "core" / "skills" / seat / "SKILL.md"
+        text = path.read_text(encoding="utf-8").lower()
+        assert "superpowers" not in text, seat
+        assert "superpowers-borrowed" not in text, seat
+        assert "borrowed practices" not in text, seat
 
 
-@pytest.mark.parametrize("seat", _SEATS)
-def test_seat_skills_reference_borrowed(seat: str) -> None:
-    path = _REPO / "core" / "skills" / seat / "SKILL.md"
-    text = path.read_text(encoding="utf-8")
-    assert "## Borrowed Practices" in text, seat
-    assert "see [`core/references/superpowers-borrowed/" in text, seat
+def test_skill_catalog_does_not_expose_superpowers() -> None:
+    text = (_REPO / "core" / "references" / "skill-catalog.md").read_text(encoding="utf-8").lower()
+    assert "superpowers" not in text
+    assert "superpowers-borrowed" not in text
+
+
+def test_v3_seat_templates_do_not_reference_superpowers() -> None:
+    for path in (_REPO / "core" / "seat-templates").glob("*.yaml"):
+        text = path.read_text(encoding="utf-8").lower()
+        assert "superpowers" not in text, path.name

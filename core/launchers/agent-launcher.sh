@@ -16,7 +16,18 @@
 
 set -euo pipefail
 
-REAL_HOME="$HOME"
+# Seat sessions live on the default tmux socket and are managed by this
+# launcher from *outside* tmux. If invoked while $TMUX is set (e.g. the
+# operator runs `restart-seat.sh` from inside a tmux pane, or the host
+# desktop app inherits TMUX from its launching shell), `tmux new-session`
+# below either refuses with "sessions should be nested with care" or
+# nests the new server inside the caller's pane — both break seat
+# lifecycle. Strip the inherited env up front so every downstream tmux
+# call lands on the outer/server we own. (`send-and-verify.sh` defends
+# per-invocation with `env -u TMUX`; this is the launcher-side mirror.)
+unset TMUX TMUX_PANE
+
+REAL_HOME="${REAL_HOME:-$HOME}"
 LAUNCHER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LAUNCHER_REPO_ROOT="$(cd "$LAUNCHER_DIR/../.." && pwd)"
 LAUNCHER_PYTHON_BIN="${PYTHON_BIN:-python3}"
@@ -189,7 +200,38 @@ validate_top_level_inputs() {
 
 
 exec_agent_shell_command() {
-  local -a cmd=(bash "$0" --tool "$TOOL_NAME" --session "$SESSION_NAME" --auth "$AUTH_MODE" --dir "$WORKDIR" --exec-agent)
+  # tmux new-session doesn't propagate non-allowlisted env vars from the
+  # caller to the spawned shell. Worse, an already-running tmux server can
+  # carry stale CLAWSEAT_* values from a previous seat in its global
+  # environment. Clear every managed key first, then explicitly inject this
+  # launch's values into the pane command.
+  local -a managed_env_vars=(
+    CARTOONER_CLAUDE_CODE_EXECUTABLE
+    REAL_HOME
+    CLAWSEAT_ROOT
+    CLAWSEAT_PROJECT
+    CLAWSEAT_PROVIDER
+    CLAWSEAT_SEAT
+    CLAWSEAT_ENGINEER_ID
+    CLAWSEAT_ENGINEER_PROFILE
+    CLAWSEAT_TOOLS_ISOLATION
+    CLAWSEAT_PROJECT_TOOL_ROOT
+    CLAWSEAT_NO_AUTO_RESUME
+    CLAWSEAT_MEMORY_BRIEF
+    CLAWSEAT_ANCESTOR_BRIEF
+  )
+  local -a cmd=(env)
+  local key value
+  for key in "${managed_env_vars[@]}"; do
+    cmd+=("-u" "$key")
+  done
+  for key in "${managed_env_vars[@]}"; do
+    value="${!key:-}"
+    if [[ -n "$value" ]]; then
+      cmd+=("$key=$value")
+    fi
+  done
+  cmd+=(bash "$0" --tool "$TOOL_NAME" --session "$SESSION_NAME" --auth "$AUTH_MODE" --dir "$WORKDIR" --exec-agent)
   if [[ -n "$CUSTOM_ENV_FILE" ]]; then
     cmd+=(--custom-env-file "$CUSTOM_ENV_FILE")
   fi
@@ -241,6 +283,7 @@ fi
 
 if [[ -z "$EXEC_MODE" ]]; then
   validate_top_level_inputs
+  ensure_launcher_proxy_env
   ensure_custom_env_file_for_auth
 
   if [[ "$DRY_RUN" == "1" ]]; then
@@ -299,6 +342,7 @@ EOF
 fi
 
 validate_top_level_inputs
+ensure_launcher_proxy_env
 ensure_custom_env_file_for_auth
 
 load_shared_secrets

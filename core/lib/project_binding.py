@@ -56,10 +56,10 @@ from typing import Any
 
 from real_home import real_user_home
 
-try:  # Python 3.11+ has tomllib in stdlib; fall back to `tomli` for older.
-    import tomllib  # type: ignore[attr-defined]
-except ImportError:  # pragma: no cover
-    import tomli as tomllib  # type: ignore[no-redef]
+import sys as _sys, pathlib as _pl
+_pb_scripts = str(_pl.Path(__file__).resolve().parent.parent / "scripts")
+if _pb_scripts not in _sys.path: _sys.path.insert(0, _pb_scripts)
+from _toml_compat import loads_safe as _toml_loads, load_safe as _toml_load
 
 BINDING_SCHEMA_VERSION = 3
 BINDING_FILE_NAME = "PROJECT_BINDING.toml"
@@ -285,7 +285,7 @@ def load_binding(project: str, *, home: Path | None = None) -> ProjectBinding | 
     if not path.exists():
         return None
     try:
-        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+        raw = _toml_loads(path.read_text(encoding="utf-8"))
     except Exception as exc:  # parse errors should not be silent
         raise ProjectBindingError(f"cannot parse {path}: {exc}") from exc
 

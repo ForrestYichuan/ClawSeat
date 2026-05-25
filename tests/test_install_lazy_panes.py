@@ -159,6 +159,58 @@ def test_install_bootstrap_writes_runtime_template_and_lazy_grid(tmp_path: Path)
     assert "ClawSeat install complete" in result.stdout
 
 
+def test_install_no_window_skips_native_iterm_payloads_but_launches_memory(tmp_path: Path) -> None:
+    root, home, launcher_log, tmux_log, py_stubs = _fake_install_root(tmp_path)
+    agent_admin_log = tmp_path / "agent_admin.jsonl"
+    iterm_payload_log = tmp_path / "iterm_payload.jsonl"
+
+    result = subprocess.run(
+        [
+            "bash",
+            str(root / "scripts" / "install.sh"),
+            "--project",
+            "spawn49",
+            "--template",
+            "clawseat-engineering",
+            "--provider",
+            "minimax",
+            "--no-window",
+        ],
+        input="\n",
+        capture_output=True,
+        text=True,
+        timeout=30,
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "CLAWSEAT_REAL_HOME": str(home),
+            "PATH": f"{root.parent / 'bin'}{os.pathsep}{os.environ['PATH']}",
+            "PYTHONPATH": f"{py_stubs}{os.pathsep}{os.environ.get('PYTHONPATH', '')}",
+            "PYTHON_BIN": sys.executable,
+            "LOG_FILE": str(launcher_log),
+            "TMUX_LOG_FILE": str(tmux_log),
+            "AGENT_ADMIN_LOG": str(agent_admin_log),
+            "ITERM_PAYLOAD_LOG": str(iterm_payload_log),
+        },
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "skip native iTerm windows (--no-window)" in result.stdout
+    assert not iterm_payload_log.exists()
+
+    records = _read_jsonl(launcher_log)
+    assert [record["session"] for record in records] == ["spawn49-memory-claude"]
+
+    bootstrap_calls = _read_jsonl(agent_admin_log)
+    assert bootstrap_calls[0]["argv"][:4] == [
+        "project",
+        "bootstrap",
+        "--template",
+        "clawseat-engineering",
+    ]
+
+
 def test_install_explicit_custom_api_flags_work_without_detect_or_tty(tmp_path: Path) -> None:
     root, home, launcher_log, tmux_log, py_stubs = _fake_install_root(tmp_path)
     agent_admin_log = tmp_path / "agent_admin.jsonl"

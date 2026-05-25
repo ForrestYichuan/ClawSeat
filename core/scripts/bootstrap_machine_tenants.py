@@ -15,10 +15,7 @@ for _p in (str(_REPO_ROOT), str(_REPO_ROOT / "core" / "lib")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover
-    import tomli as tomllib
+from _toml_compat import loads_safe as _toml_loads, load_safe as _toml_load
 
 from core.lib.machine_config import FeishuRouting, OpenClawTenant, load_machine, write_machine
 
@@ -28,7 +25,7 @@ def _contract_fields(workspace: Path) -> tuple[str, str]:
     if not contract.exists():
         return "", ""
     try:
-        data = tomllib.loads(contract.read_text(encoding="utf-8"))
+        data = _toml_loads(contract.read_text(encoding="utf-8"))
     except Exception:
         return "", ""
     return (

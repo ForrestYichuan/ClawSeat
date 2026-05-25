@@ -15,8 +15,18 @@ symlink_skills() {
       warn "skill symlink skipped; missing skill directory: $target"
       continue
     fi
-    [[ -L "$link" ]] && rm -f "$link"
-    ln -sfn "$target" "$link" || die 31 SKILL_SYMLINK_FAILED "unable to link $link -> $target"
+    if [[ -L "$link" ]]; then
+      rm -f "$link"
+    elif [[ -e "$link" ]]; then
+      local backup="${link}.bak.$(date -u +%Y%m%dT%H%M%SZ)" idx=0
+      while [[ -e "$backup" ]]; do
+        idx=$((idx + 1))
+        backup="${link}.bak.$(date -u +%Y%m%dT%H%M%SZ).$idx"
+      done
+      mv "$link" "$backup" || die 31 SKILL_SYMLINK_FAILED "unable to preserve unmanaged skill path $link"
+      warn "preserved unmanaged skill path: $link -> $backup"
+    fi
+    ln -s "$target" "$link" || die 31 SKILL_SYMLINK_FAILED "unable to link $link -> $target"
   done
 }
 

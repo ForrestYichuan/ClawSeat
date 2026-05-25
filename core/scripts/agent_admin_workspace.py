@@ -7,10 +7,7 @@ import textwrap
 from pathlib import Path
 from typing import Any
 
-try:
-    import tomllib  # type: ignore[attr-defined]
-except ImportError:  # pragma: no cover
-    import tomli as tomllib  # type: ignore[no-redef]
+from _toml_compat import loads_safe as _toml_loads, load_safe as _toml_load
 
 # agent_admin_config lives in the same scripts directory.
 _SCRIPTS_DIR = str(Path(__file__).resolve().parent)
@@ -28,6 +25,7 @@ HARNESS_SCRIPTS_ROOT = REPO_ROOT / "core" / "skills" / "gstack-harness" / "scrip
 TOOLS_SHARED_ROOT = REPO_ROOT / "core" / "templates" / "shared" / "TOOLS"
 
 _SPECIALIST_ROLES = frozenset({"builder", "reviewer", "patrol", "designer"})
+DEFAULT_QUALITY_GATE_DOC = "quality-docs/QUALITY.md"
 
 # Ensure `core/` is importable so bare `from resolve import ...` resolves
 # regardless of how this module is invoked (direct script vs import).
@@ -75,7 +73,7 @@ def render_authority_lines(engineer: Any) -> list[str]:
         return []
     capabilities: list[str] = []
     if getattr(engineer, "human_facing", False):
-        capabilities.append("human-facing intake and user communication")
+        capabilities.append("human-facing intake and professional user communication")
     if getattr(engineer, "active_loop_owner", False):
         capabilities.append("active loop ownership")
     if getattr(engineer, "dispatch_authority", False):
@@ -112,20 +110,32 @@ def render_protocol_reminder_lines(
         return _render_protocol_reminder_cartooner(seat_id)
     if normalized in {"project-memory", "memory-oracle"}:
         lines.extend([
-            "1. **Dispatch**: `agent_admin task create` -> workflow.md -> `dispatch_task.py` -> send-and-verify",
-            "2. **Verify Ack**: every dispatch -> 4-step check (handoffs .consumed / pane / DELIVERY / git fetch)",
-            "3. **Chain end**: accept planner relay -> write KB summary (experience retention)",
-            "4. **Privacy**: network queries -> clawseat-privacy check first; no PII/secret/token in KB",
-            "5. **Don't**: dispatch specialist directly (use planner); no code / config / seat lifecycle",
+            "1. **Status Snapshot**: user wake / pre-dispatch -> `agent_admin.py brief planner-status --project <project>`; manual queue scans only if it fails or debugging needs detail",
+            "2. **Brief Fidelity**: preserve operator/warden Goal/Context/Boundary/Anti-goal/Acceptance; do not weaken product intent",
+            "3. **v3 Dispatch**: memory→planner uses `agent_admin.py brief queue`; downstream/legacy handoff uses `dispatch_task.py`",
+            "4. **Verify Queue**: after queueing, read `planner-status`; only debug with raw queue files if the snapshot is unclear",
+            "5. **Chain end**: accept queue-drained planner relay -> read DELIVERY / acceptance / review/latest -> write KB summary",
+            "6. **Don't**: direct downstream dispatch, code/config/seat lifecycle, or network/outbound without privacy guard; runtime blocks v3 memory→planner split-brain dispatch",
         ])
     elif normalized in {"planner", "planner-dispatcher"}:
         lines.extend([
-            "1. **/clear before dispatch**: G1 closure / G2 context-relatedness / G3 idle; 三 gate 全过即发，先 /clear 再 dispatch；见 `core/skills/planner/SKILL.md:57`。",
-            "2. **Dispatch specialist**: dispatch_task.py -> handoff.json + send-and-verify wake target",
-            "3. **Strict fan-in**: before relay memory, verify every specialist .consumed receipt; missing -> verdict=BLOCKED",
-            "4. **Post-DELIVERY relay memory**: same turn -> read DELIVERY -> verdict -> planner/DELIVERY.md -> send-and-verify memory",
-            "5. **Fan-out**: 2+ disjoint sub-goals -> workflow.md mode: parallel_subagents",
-            "6. **Compact not Clear**: emit [COMPACT-REQUESTED] to preserve workflow.md state",
+            "1. **Intent Fidelity**: preserve brief outcome / constraints / anti-goal / acceptance; bounce instead of implementing a weaker reading",
+            "2. **/clear before dispatch**: G1 closure / G2 context-relatedness / G3 idle; 三 gate 全过即发，先 /clear 再 dispatch；见 `core/skills/planner/SKILL.md:57`。",
+            "3. **Dispatch specialist**: dispatch_task.py -> handoff.json + send-and-verify wake target",
+            "4. **Strict fan-in**: before relay memory, verify every specialist .consumed receipt; missing -> verdict=BLOCKED",
+            "5. **Post-DELIVERY closeout**: read DELIVERY -> verdict -> planner/DELIVERY.md; in multi-team delivery mode notify memory only when queue is drained",
+            "6. **Compact not Clear**: relay `[memory: compact-me]` to memory; never emit `[CLEAR-REQUESTED]`",
+        ])
+    elif normalized in {"solo-tui", "user-proxy", "warden"}:
+        lines.extend([
+            "1. **No background patrol**: do not monitor, poll, or inspect internals unless the user explicitly asks.",
+            "2. **Spec authoring**: act as a professional architecture/code advisor; preserve user intent as goal + context + boundary + anti-goal + acceptance + delivery.",
+            "3. **Problem reports**: investigate root cause before forwarding a vague issue to another agent.",
+            "4. **Product testing**: use product-test personas only when validation needs them; inspect logs/events/artifacts when evidence is needed.",
+            "5. **Patrol review**: when explicitly/scheduled to patrol, review delivered-but-unintegrated work; merge PASS only to project review/latest and notify user.",
+            "6. **Web opening**: open user-facing webpages in Cartooner's Inspiration Browser by default; external browser only by request/auth/debug need.",
+            "7. **Memory relay**: hand product/code briefs to memory for queue/state tracking; do not become the state machine.",
+            "8. **Direct fixes**: fix framework/template/automation defects in your scope; do not become memory or planner by default.",
         ])
     elif normalized in {"builder", "reviewer"}:
         lines.extend([
@@ -181,7 +191,29 @@ def render_read_first_lines(session: Any, project: Any, engineer: Any) -> list[s
         f"3. `{tasks_doc}`",
     ]
     next_index = 4
-    if engineer.role in {"frontstage-supervisor", "planner-dispatcher"}:
+    include_team_ownership = (
+        engineer.role in {"memory", "project-memory", "memory-oracle", "planner", "planner-dispatcher"}
+        and _is_multi_team_project(project.name)
+    )
+    if include_team_ownership:
+        lines.append(f"{next_index}. `{tasks_root}/TEAM_OWNERSHIP.md`")
+        next_index += 1
+    quality_gate_path = ""
+    if engineer.role in {"memory", "project-memory", "memory-oracle"} and _is_multi_team_project(project.name):
+        quality_gate_path = _quality_gate_path_for_project(project.name, tasks_root)
+    elif engineer.role in {"planner", "planner-dispatcher"}:
+        quality_gate_path = _quality_gate_path_for_seat(
+            project.name,
+            str(getattr(session, "engineer_id", "") or ""),
+            tasks_root,
+        )
+    if quality_gate_path:
+        lines.append(f"{next_index}. `{quality_gate_path}`")
+        next_index += 1
+    if engineer.role in {"memory", "project-memory", "memory-oracle", "planner", "planner-dispatcher"}:
+        lines.append(f"{next_index}. `{status_doc}`")
+        next_index += 1
+    if engineer.role in {"frontstage-supervisor"}:
         lines.append(f"{next_index}. `{status_doc}`")
         next_index += 1
     if engineer.role == "planner-dispatcher":
@@ -234,6 +266,8 @@ def render_role_scope_summary(engineer: Any) -> str:
     role = engineer.role
     if role == "frontstage-supervisor":
         return "intake framing, seat launch, patrol, unblock, and escalation"
+    if role == "solo-tui":
+        return "professional intent analysis, root-cause evidence, AI-friendly specs, product validation, and lightweight direct fixes"
     if role == "planner-dispatcher":
         return "task initialization, research coordination, execution planning, next-hop routing, and durable consumption of completions"
     if role == "builder":
@@ -287,6 +321,474 @@ def preferred_seat_for_role(
     return None
 
 
+def _load_dynamic_profile_data(project_name: str) -> tuple[Path, dict[str, Any]] | None:
+    try:
+        from resolve import dynamic_profile_path as _dpp  # noqa: PLC0415
+    except Exception:
+        return None
+    profile_path = _dpp(project_name)
+    if not profile_path.is_file():
+        return None
+    try:
+        with profile_path.open("rb") as fh:
+            data = _toml_load(fh)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    data = _merge_project_toml_ssot(project_name, data)
+    return profile_path, data
+
+
+def _merge_project_toml_ssot(project_name: str, profile_data: dict[str, Any]) -> dict[str, Any]:
+    """Overlay project.toml roster/runtime choices onto dynamic profile metadata."""
+    project_toml = _ws_effective_home() / ".agents" / "projects" / project_name / "project.toml"
+    if not project_toml.exists():
+        return profile_data
+    try:
+        with project_toml.open("rb") as fh:
+            project_data = _toml_load(fh)
+    except Exception:
+        return profile_data
+    if not isinstance(project_data, dict):
+        return profile_data
+
+    active_seats = [
+        str(item).strip()
+        for item in (project_data.get("engineers") or [])
+        if str(item).strip()
+    ]
+    if not active_seats:
+        return profile_data
+    active = set(active_seats)
+
+    merged: dict[str, Any] = dict(profile_data)
+    merged["seats"] = active_seats
+
+    profile_overrides = profile_data.get("seat_overrides") or {}
+    if not isinstance(profile_overrides, dict):
+        profile_overrides = {}
+    project_overrides = project_data.get("seat_overrides") or {}
+    if not isinstance(project_overrides, dict):
+        project_overrides = {}
+    overrides: dict[str, dict[str, Any]] = {}
+    for seat in active_seats:
+        base = profile_overrides.get(seat) if isinstance(profile_overrides.get(seat), dict) else {}
+        project_override = (
+            project_overrides.get(seat) if isinstance(project_overrides.get(seat), dict) else {}
+        )
+        overrides[seat] = {**base, **project_override}
+    merged["seat_overrides"] = overrides
+
+    profile_roles = profile_data.get("seat_roles") or {}
+    if not isinstance(profile_roles, dict):
+        profile_roles = {}
+    roles: dict[str, str] = {}
+    for seat in active_seats:
+        override = overrides.get(seat) or {}
+        role = str(override.get("role") or profile_roles.get(seat) or "").strip()
+        if seat == "memory":
+            role = "project-memory"
+        elif not role and str(override.get("team") or "").strip():
+            role = "planner"
+        roles[seat] = role
+    merged["seat_roles"] = roles
+
+    profile_teams = profile_data.get("teams") or {}
+    if not isinstance(profile_teams, dict):
+        profile_teams = {}
+    teams: dict[str, dict[str, Any]] = {}
+    for team_name, team_cfg in profile_teams.items():
+        if not isinstance(team_cfg, dict):
+            continue
+        seats = [str(item) for item in (team_cfg.get("seats") or []) if str(item) in active]
+        if seats:
+            teams[str(team_name)] = {**team_cfg, "seats": seats}
+    for seat in active_seats:
+        override = overrides.get(seat) or {}
+        team = str(override.get("team") or "").strip()
+        if not team:
+            continue
+        cfg = dict(teams.get(team) or {})
+        seats = [str(item) for item in (cfg.get("seats") or [])]
+        if seat not in seats:
+            seats.append(seat)
+        cfg.setdefault("team_type", "subteam")
+        cfg.setdefault("notify_policy", "queue_drained_only")
+        cfg["seats"] = seats
+        teams[team] = cfg
+    merged["teams"] = teams
+    return merged
+
+
+def _role_for_profile_seat(profile_data: dict[str, Any], seat_id: str) -> str:
+    roles = profile_data.get("seat_roles") or {}
+    if isinstance(roles, dict):
+        role = str(roles.get(seat_id) or "").strip()
+        if role:
+            return role
+    return ""
+
+
+def _team_for_profile_seat(profile_data: dict[str, Any], seat_id: str) -> tuple[str, dict[str, Any]] | None:
+    mode = profile_data.get("mode") or {}
+    if not isinstance(mode, dict) or str(mode.get("team_structure") or "single") != "multi":
+        return None
+    project_memory = str(mode.get("project_memory") or "memory").strip() or "memory"
+    if seat_id == project_memory:
+        return None
+    teams = profile_data.get("teams") or {}
+    if not isinstance(teams, dict):
+        return None
+    for team_name, team_cfg in teams.items():
+        if not isinstance(team_cfg, dict):
+            continue
+        seats = [str(item) for item in team_cfg.get("seats") or []]
+        if seat_id in seats:
+            return str(team_name), team_cfg
+    return None
+
+
+def _is_project_memory_seat(profile_data: dict[str, Any], seat_id: str) -> bool:
+    mode = profile_data.get("mode") or {}
+    if not isinstance(mode, dict) or str(mode.get("team_structure") or "single") != "multi":
+        return False
+    project_memory = str(mode.get("project_memory") or "memory").strip() or "memory"
+    return seat_id == project_memory
+
+
+def _is_multi_team_project(project_name: str) -> bool:
+    loaded = _load_dynamic_profile_data(project_name)
+    if loaded is None:
+        return False
+    _profile_path, profile_data = loaded
+    mode = profile_data.get("mode") or {}
+    return isinstance(mode, dict) and str(mode.get("team_structure") or "single") == "multi"
+
+
+def _team_type_for(team_name: str, team_cfg: dict[str, Any]) -> str:
+    explicit = str(team_cfg.get("team_type") or "").strip()
+    if explicit:
+        return explicit
+    if team_name == "quality-docs" or bool(team_cfg.get("autonomous")):
+        return "quality-docs"
+    return "subteam"
+
+
+def _planner_mode_for(team_name: str, team_cfg: dict[str, Any]) -> str:
+    explicit = str(team_cfg.get("planner_mode") or "").strip()
+    if explicit:
+        return explicit
+    return "quality_campaign" if _team_type_for(team_name, team_cfg) == "quality-docs" else "delivery"
+
+
+def _notify_policy_for(team_name: str, team_cfg: dict[str, Any]) -> str:
+    explicit = str(team_cfg.get("notify_policy") or "").strip()
+    if explicit:
+        return explicit
+    return "never_notify_memory" if _team_type_for(team_name, team_cfg) == "quality-docs" else "queue_drained_only"
+
+
+def _quality_gate_doc_for(team_name: str, team_cfg: dict[str, Any]) -> str:
+    if _team_type_for(team_name, team_cfg) != "quality-docs":
+        return ""
+    return str(team_cfg.get("quality_gate_doc") or DEFAULT_QUALITY_GATE_DOC).strip()
+
+
+def _resolve_project_doc_path(tasks_root: str, doc_path: str) -> str:
+    if not doc_path:
+        return ""
+    if doc_path.startswith("/"):
+        return doc_path
+    return f"{tasks_root}/{doc_path.lstrip('/')}"
+
+
+def _quality_gate_path_for_project(project_name: str, tasks_root: str) -> str:
+    loaded = _load_dynamic_profile_data(project_name)
+    if loaded is None:
+        return ""
+    _profile_path, profile_data = loaded
+    teams = profile_data.get("teams") or {}
+    if not isinstance(teams, dict):
+        return ""
+    for team_name, team_cfg in teams.items():
+        if not isinstance(team_cfg, dict):
+            continue
+        doc_path = _quality_gate_doc_for(str(team_name), team_cfg)
+        if doc_path:
+            return _resolve_project_doc_path(tasks_root, doc_path)
+    return ""
+
+
+def _quality_gate_path_for_seat(project_name: str, seat_id: str, tasks_root: str) -> str:
+    loaded = _load_dynamic_profile_data(project_name)
+    if loaded is None:
+        return ""
+    _profile_path, profile_data = loaded
+    team_info = _team_for_profile_seat(profile_data, seat_id)
+    if team_info is None:
+        return ""
+    team_name, team_cfg = team_info
+    doc_path = _quality_gate_doc_for(team_name, team_cfg)
+    return _resolve_project_doc_path(tasks_root, doc_path) if doc_path else ""
+
+
+def _render_runtime_fragment(override: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for key in ("tool", "auth_mode", "provider", "model"):
+        value = str(override.get(key) or "").strip()
+        if value:
+            parts.append(f"{key}={value}")
+    return ", ".join(parts) if parts else "runtime not declared"
+
+
+def render_multi_team_project_ownership_lines(session: Any, project: Any) -> list[str]:
+    loaded = _load_dynamic_profile_data(project.name)
+    if loaded is None:
+        return []
+    profile_path, profile_data = loaded
+    seat_id = str(getattr(session, "engineer_id", "") or "").strip()
+    if not _is_project_memory_seat(profile_data, seat_id):
+        return []
+
+    teams = profile_data.get("teams") or {}
+    if not isinstance(teams, dict):
+        return []
+    roles = profile_data.get("seat_roles") or {}
+    if not isinstance(roles, dict):
+        roles = {}
+    overrides = profile_data.get("seat_overrides") or {}
+    if not isinstance(overrides, dict):
+        overrides = {}
+
+    tasks_root = _resolve_tasks_root(project)
+    quality_gate_path = _quality_gate_path_for_project(project.name, tasks_root)
+    lines = [
+        "## Project Team Ownership",
+        "",
+        f"- Profile: `{profile_path}`",
+        f"- Project mode: `multi`",
+        f"- Project memory: `{seat_id}`",
+        f"- Ownership summary doc: `{tasks_root}/TEAM_OWNERSHIP.md`",
+        "- Memory owns stable roster/ownership facts; team planners own per-task workflows.",
+    ]
+    if quality_gate_path:
+        lines.append(f"- Memory acceptance preflight: read quality gate `{quality_gate_path}` before commit/push.")
+    lines.extend(["", "## Teams", ""])
+    for team_name, team_cfg in teams.items():
+        if not isinstance(team_cfg, dict):
+            continue
+        team_name_str = str(team_name)
+        team_type = _team_type_for(team_name_str, team_cfg)
+        planner_mode = _planner_mode_for(team_name_str, team_cfg)
+        notify_policy = _notify_policy_for(team_name_str, team_cfg)
+        quality_gate_doc = _quality_gate_doc_for(team_name_str, team_cfg)
+        team_seats = [str(item) for item in team_cfg.get("seats") or []]
+        ownership_paths = [
+            str(item).strip()
+            for item in team_cfg.get("ownership_paths") or []
+            if str(item).strip()
+        ]
+        seat_fragments: list[str] = []
+        for managed_seat in team_seats:
+            role = str(roles.get(managed_seat) or "unknown").strip() or "unknown"
+            override = overrides.get(managed_seat) if isinstance(overrides.get(managed_seat), dict) else {}
+            instance = str(override.get("instance") or "").strip()
+            label = f"{role}-{instance}" if instance else role
+            purpose = str(override.get("purpose") or "").strip()
+            purpose_suffix = f" ({purpose})" if purpose else ""
+            seat_fragments.append(f"{label}: `{managed_seat}`{purpose_suffix}")
+        team_bits = [
+            f"type `{team_type}`",
+            f"planner_mode `{planner_mode}`",
+            f"notify_policy `{notify_policy}`",
+        ]
+        if team_cfg.get("autonomous"):
+            team_bits.append("autonomous")
+        review_model = str(team_cfg.get("review_model") or "").strip()
+        if review_model:
+            team_bits.append(f"review `{review_model}`")
+        if ownership_paths:
+            team_bits.append("paths " + ", ".join(f"`{path}`" for path in ownership_paths))
+        else:
+            team_bits.append("paths not declared")
+        lines.append(f"- `{team_name}`: " + "; ".join(team_bits))
+        if quality_gate_doc:
+            lines.append(f"  Quality gate: `{quality_gate_doc}`")
+        if seat_fragments:
+            lines.append("  Seats: " + "; ".join(seat_fragments))
+        if team_type == "quality-docs":
+            lines.append(
+                "  Boundary: continuous QA/docs only; no product code edits; findings are recorded for memory's pull-based gate."
+            )
+    return lines
+
+
+def render_multi_team_scope_lines(session: Any, project: Any) -> list[str]:
+    loaded = _load_dynamic_profile_data(project.name)
+    if loaded is None:
+        return []
+    profile_path, profile_data = loaded
+    seat_id = str(getattr(session, "engineer_id", "") or "").strip()
+    team_info = _team_for_profile_seat(profile_data, seat_id)
+    if team_info is None:
+        return []
+    team_name, team_cfg = team_info
+    team_type = _team_type_for(team_name, team_cfg)
+    planner_mode = _planner_mode_for(team_name, team_cfg)
+    notify_policy = _notify_policy_for(team_name, team_cfg)
+    quality_gate_doc = _quality_gate_doc_for(team_name, team_cfg)
+    tasks_root = _resolve_tasks_root(project)
+    team_seats = [str(item) for item in team_cfg.get("seats") or []]
+    overrides = profile_data.get("seat_overrides") or {}
+    if not isinstance(overrides, dict):
+        overrides = {}
+    current_role = _role_for_profile_seat(profile_data, seat_id)
+    ownership_paths = [
+        str(item).strip()
+        for item in team_cfg.get("ownership_paths") or []
+        if str(item).strip()
+    ]
+    scaling_policy = team_cfg.get("scaling_policy") or {}
+    if not isinstance(scaling_policy, dict):
+        scaling_policy = {}
+
+    seat_override = overrides.get(seat_id) if isinstance(overrides.get(seat_id), dict) else {}
+    seat_display_name = str(seat_override.get("display_name") or "").strip()
+    seat_label = f"`{seat_display_name}` (`{seat_id}`)" if seat_display_name and seat_display_name != seat_id else f"`{seat_id}`"
+
+    lines = [
+        "## Team Scope",
+        "",
+        f"- Profile: `{profile_path}`",
+        f"- Project mode: `multi`",
+        f"- Your team: `{team_name}`",
+        f"- Your seat: {seat_label} (`{current_role or 'role not declared'}`)",
+        f"- Team type: `{team_type}`",
+        f"- Planner mode: `{planner_mode}`",
+        f"- Notify policy: `{notify_policy}`",
+        f"- Team queue: `~/.agents/tasks/{project.name}/{team_name}/tasks.queue.jsonl`",
+    ]
+    if quality_gate_doc:
+        lines.append(f"- Quality gate doc: `{_resolve_project_doc_path(tasks_root, quality_gate_doc)}`")
+    if ownership_paths:
+        lines.append(
+            "- Team ownership paths: "
+            + ", ".join(f"`{path}`" for path in ownership_paths)
+        )
+    else:
+        lines.append("- Team ownership paths: not declared; ask memory to clarify before broad dispatch")
+    if scaling_policy:
+        policy_items = ", ".join(
+            f"{key}={value}" for key, value in sorted(scaling_policy.items())
+        )
+        lines.append(f"- Scaling policy: `{policy_items}`")
+
+    lines.extend(["", "## Managed Team Seats", ""])
+    builders: list[str] = []
+    reviewer_seats: list[str] = []
+    for managed_seat in team_seats:
+        role = _role_for_profile_seat(profile_data, managed_seat) or "unknown"
+        override = overrides.get(managed_seat) if isinstance(overrides.get(managed_seat), dict) else {}
+        if role == "builder":
+            builders.append(managed_seat)
+        elif role == "reviewer":
+            reviewer_seats.append(managed_seat)
+        details: list[str] = [f"role `{role}`", _render_runtime_fragment(override)]
+        instance = str(override.get("instance") or "").strip()
+        if instance:
+            details.append(f"instance `{instance}`")
+        purpose = str(override.get("purpose") or "").strip()
+        if purpose:
+            details.append(f"purpose: {purpose}")
+        capabilities = [
+            str(item).strip()
+            for item in override.get("capabilities") or []
+            if str(item).strip()
+        ]
+        if capabilities:
+            details.append("capabilities: " + ", ".join(f"`{item}`" for item in capabilities))
+        managed_dn = str(override.get("display_name") or "").strip()
+        managed_label = (
+            f"`{managed_dn}` (`{managed_seat}`)"
+            if managed_dn and managed_dn != managed_seat
+            else f"`{managed_seat}`"
+        )
+        marker = " (you)" if managed_seat == seat_id else ""
+        lines.append(f"- {managed_label}{marker}: " + "; ".join(details))
+
+    if current_role in {"planner", "planner-dispatcher"} and planner_mode == "quality_campaign":
+        patrols = [
+            managed_seat
+            for managed_seat in team_seats
+            if _role_for_profile_seat(profile_data, managed_seat) == "patrol"
+        ]
+        lines.extend(["", "## Quality Campaign Rules", ""])
+        lines.extend(
+            [
+                "- Do not notify memory directly; update `QUALITY.md`, findings, campaigns, missions, and evidence instead.",
+                "- Design high-frequency patrol missions from dev queues, workflow docs, deliveries, git diff, flaky history, and open risks.",
+                "- After a clean mission, raise difficulty; after three clean rounds for one patrol/campaign, switch that patrol to a new attack surface.",
+                "- Research likely root cause for every finding, but do not edit product implementation or directly command dev teams.",
+                "- Memory pulls this quality gate before final acceptance, commit, or push.",
+            ]
+        )
+        if patrols:
+            lines.append("- Patrol seats: " + ", ".join(f"`{seat}`" for seat in patrols))
+        else:
+            lines.append("- No patrol seats are declared; ask memory for roster repair.")
+    elif current_role in {"planner", "planner-dispatcher"}:
+        max_builders = int(scaling_policy.get("max_builders", -1))
+        planner_self_contained = bool(team_cfg.get("planner_self_contained", False))
+        is_planner_only = planner_self_contained or max_builders == 0
+        if is_planner_only:
+            lines.extend(["", "## Planner-Only Mode", ""])
+            lines.extend(
+                [
+                    "- Self-contained: research, implement, tests, self-review, `task_done`, and queue-drained relay all owned by this planner.",
+                    "- Do not dispatch builder work; this team has no builder seat.",
+                    "- Escalate to memory only for roster changes, permission decisions, or operator authority blockers.",
+                    "- After task PASS, append `task_done`, claim/continue the next queued task, and do not notify memory per task.",
+                    "- Notify memory only when this team queue is drained or an exception needs memory/operator authority.",
+                ]
+            )
+        else:
+            lines.extend(["", "## Dev Planner Dispatch Rules", ""])
+            lines.extend(
+                [
+                    "- Research the task, define verification/checklist first, then dispatch implementation to the exact owning builder seat.",
+                    "- Prefer writing or naming acceptance tests before builder implementation; builder must not weaken planner acceptance tests.",
+                    "- When builder delivery fails, send concrete rework to that builder until acceptance passes or the rework threshold is hit.",
+                    "- After task PASS, append `task_done`, claim/continue the next queued task, and do not notify memory per task.",
+                    "- Notify memory only when this team queue is drained or an exception needs memory/operator authority.",
+                ]
+            )
+            lines.extend(["", "## Builder Assignment Rules", ""])
+            if builders:
+                lines.append(
+                    "- Available builders in this team: "
+                    + ", ".join(f"`{builder}`" for builder in builders)
+                )
+            else:
+                lines.append("- No builder is declared for this team; bounce implementation work to memory.")
+            if reviewer_seats:
+                lines.append("- Reviewer gate: " + ", ".join(f"`{seat}`" for seat in reviewer_seats))
+            elif len(builders) > 1:
+                lines.append("- Reviewer gate missing for multiple builders; block and ask memory for roster repair.")
+            else:
+                lines.append("- Reviewer fallback: planner reviews only because this team has one builder.")
+            lines.extend(
+                [
+                    "- With multiple builders, never dispatch to bare role `builder`; choose an exact `owner_seat`.",
+                    "- Assign by declared `capabilities`, `purpose`, and `ownership_paths` first; then by disjoint files/tests.",
+                    "- Keep the same file or tightly coupled module on one builder unless the workflow declares a merge owner.",
+                    "- Run parallel builder waves only when write scopes are disjoint and fan-in is explicit before review.",
+                    "- If a fourth builder would be useful, stop and ask memory to propose a new subteam.",
+                ]
+            )
+    return lines
+
+
 def render_project_seat_map_lines(
     session: Any,
     project: Any,
@@ -295,8 +797,14 @@ def render_project_seat_map_lines(
     project_engineers: dict[str, Any] | None = None,
     engineer_order: list[str] | None = None,
 ) -> list[str]:
+    memory_lines = render_multi_team_project_ownership_lines(session, project)
+    if memory_lines:
+        return memory_lines
+    lines = render_multi_team_scope_lines(session, project)
+    if lines and engineer.role in {"planner", "planner-dispatcher"}:
+        return lines
     if engineer.role not in {"frontstage-supervisor", "planner-dispatcher"}:
-        return []
+        return lines
     engineers = project_engineers or {}
     ordered_engineer_ids = list(engineer_order or project.engineers or engineers.keys())
     seat_lines: list[str] = []
@@ -312,18 +820,27 @@ def render_project_seat_map_lines(
         scope = render_role_scope_summary(mapped_engineer)
         seat_lines.append(f"- `{engineer_id}` -> `{mapped_engineer.role}`: {scope} (`{runtime}`)")
     if not seat_lines:
-        return []
-    lines = [
+        return lines
+    if lines:
+        lines.append("")
+    lines.extend([
         "## Project Seat Map",
         "",
         f"- Current project role order: `{' -> '.join(ordered_engineer_ids)}`",
-    ]
+    ])
     lines.extend(seat_lines)
     return lines
 
 
 def render_seat_boundary_lines(session: Any, engineer: Any) -> list[str]:
     seat_name = session.engineer_id
+    project_name = str(getattr(session, "project", "") or "").strip()
+    multi_team_context: tuple[str, dict[str, Any]] | None = None
+    if project_name:
+        loaded_profile = _load_dynamic_profile_data(project_name)
+        if loaded_profile is not None:
+            _profile_path, profile_data = loaded_profile
+            multi_team_context = _team_for_profile_seat(profile_data, seat_name)
     planner_seat = (
         preferred_seat_for_role(
             getattr(session, "project_record", None),
@@ -334,7 +851,22 @@ def render_seat_boundary_lines(session: Any, engineer: Any) -> list[str]:
         or "planner"
     )
     lines = ["## Seat Boundary", ""]
-    if engineer.role == "frontstage-supervisor":
+    if engineer.role == "solo-tui":
+        lines.extend(
+            [
+                f"- `{seat_name}` owns professional intent analysis, root-cause evidence packets, AI-friendly specs, product validation, and lightweight direct fixes.",
+                "- do not monitor or poll by default; inspect panes, queues, logs, events, or artifacts only when the user asks",
+                "- do not become project memory, planner, queue owner, or canonical dispatch authority unless the user explicitly changes the role",
+                "- when relaying work, keep the request short and include goal, context, boundary, anti-goal when needed, acceptance, and delivery",
+                "- for product/code work, hand the brief to memory for queue/state tracking instead of taking over the task chain",
+                "- during explicit or scheduled patrol, review delivered-but-unintegrated work; merge passing work only to this project's review/latest and notify the user",
+                "- when opening a webpage for the user, default to Cartooner's built-in Inspiration Browser; use external browsers only for explicit request, auth boundary, or debugging need",
+                "- when a reply is needed, include the exact temporary reply path in the message: chat, file, inbox, script, and target session if applicable",
+                "- use product-test personas only when validation needs them; use internal evidence to diagnose or verify",
+                "- directly fix framework, template, or automation defects in this seat's owned scope; avoid forwarding vague issues",
+            ]
+        )
+    elif engineer.role == "frontstage-supervisor":
         lines.extend(
             [
                 f"- `{seat_name}` owns intake framing, seat launch orchestration, patrol, unblock, and escalations.",
@@ -353,6 +885,34 @@ def render_seat_boundary_lines(session: Any, engineer: Any) -> list[str]:
             ]
         )
     elif engineer.role == "planner-dispatcher":
+        if multi_team_context is not None:
+            team_name, team_cfg = multi_team_context
+            planner_mode = _planner_mode_for(team_name, team_cfg)
+            notify_policy = _notify_policy_for(team_name, team_cfg)
+            lines.extend(
+                [
+                    f"- `{seat_name}` owns `{team_name}` execution decisions, next-hop routing, durable consumption, and planner-side acceptance.",
+                    f"- team notify policy is `{notify_policy}`; do not use legacy single-team closeout semantics in multi-team mode.",
+                    "- use document-first dispatch helpers; treat raw `tmux send-keys` as a protocol violation",
+                ]
+            )
+            if planner_mode == "quality_campaign":
+                lines.extend(
+                    [
+                        f"- expect patrol seats to return findings and evidence to `{seat_name}`, never directly to memory",
+                        "- never notify memory directly; update `QUALITY.md`, findings, campaigns, missions, and evidence instead",
+                        "- escalate to project memory only for roster, ownership, queue-dependency, or operator-authority decisions",
+                    ]
+                )
+            else:
+                lines.extend(
+                    [
+                        f"- expect builders/reviewers to return completion to `{seat_name}`, not directly to memory",
+                        "- after task PASS, append `task_done`, claim or continue the next queued task, and avoid per-task memory pings",
+                        "- notify project memory only when this team queue is drained or an exception needs memory/operator authority",
+                    ]
+                )
+            return lines
         lines.extend(
             [
                 f"- `{seat_name}` owns execution decisions, next-hop routing, and durable consumption of specialist completions.",
@@ -376,6 +936,7 @@ def render_communication_protocol_lines(
     project_name: str,
     *,
     template_name: str = "",
+    seat_id: str = "",
 ) -> list[str]:
     send_script = str(SEND_AND_VERIFY_SH)
     # Creative templates branch FIRST — even for "specialist" seats like
@@ -385,6 +946,19 @@ def render_communication_protocol_lines(
         return _render_communication_protocol_cartooner(
             engineer, project_name, send_script
         )
+
+    if engineer.role == "solo-tui":
+        lines = [
+            "## Communication Protocol",
+            "",
+            "- default to natural language; do not wrap product or SDK testing in internal protocol",
+            "- if another TUI, SDK, memory seat, or product chat must reply, state the temporary reply path in the same message",
+            "- acceptable reply paths include this chat, an absolute file path, an inbox path, or a provided send script plus exact target session",
+            "- use scripts such as peer-send only when the task needs TUI transport; otherwise send the concise professional request directly",
+            "- do not assume a standing backchannel; repeat the reply method whenever a reply matters",
+            "- treat logs, events, queues, and delivery files as diagnostic evidence, not as the default interaction surface",
+        ]
+        return lines
 
     if engineer.role in _SPECIALIST_ROLES:
         return ["Read `TOOLS/protocol.md` for full communication protocol."]
@@ -436,6 +1010,33 @@ def render_communication_protocol_lines(
             ]
         )
     elif engineer.role == "planner-dispatcher":
+        multi_team_context: tuple[str, dict[str, Any]] | None = None
+        if seat_id:
+            loaded_profile = _load_dynamic_profile_data(project_name)
+            if loaded_profile is not None:
+                _profile_path, profile_data = loaded_profile
+                multi_team_context = _team_for_profile_seat(profile_data, seat_id)
+        if multi_team_context is not None:
+            team_name, team_cfg = multi_team_context
+            planner_mode = _planner_mode_for(team_name, team_cfg)
+            notify_policy = _notify_policy_for(team_name, team_cfg)
+            lines.extend(
+                [
+                    "- dispatch via `dispatch_task.py` (not raw tmux); always pass `--test-policy` and `--intent` to activate the gstack skill",
+                    "- stamp durable `Consumed:` ACK before routing the next hop; ACK alone does NOT finish the chain",
+                    "- use canonical verdicts: `APPROVED` / `APPROVED_WITH_NITS` / `CHANGES_REQUESTED` / `BLOCKED` / `DECISION_NEEDED`",
+                    f"- this team is `{team_name}` with notify policy `{notify_policy}`; do not use legacy single-team closeout commands",
+                ]
+            )
+            if planner_mode == "quality_campaign":
+                lines.append(
+                    "- never notify memory directly; update `QUALITY.md`, findings, campaigns, missions, and evidence for memory to pull during acceptance"
+                )
+            else:
+                lines.append(
+                    "- when the team queue is drained, notify project memory with a concise queue-drained closeout and evidence links; do not send per-task memory pings"
+                )
+            return lines
         lines.extend(
             [
                 "- dispatch via `dispatch_task.py` (not raw tmux); always pass `--test-policy` and `--intent` to activate the gstack skill",
@@ -884,6 +1485,15 @@ def workspace_contract_payload(
     ]
     if engineer.role in {"frontstage-supervisor", "planner-dispatcher"}:
         source_paths.append(f"{resolved_tasks_root}/STATUS.md")
+    include_team_ownership = (
+        engineer.role in {"memory", "project-memory", "memory-oracle", "planner", "planner-dispatcher"}
+        and _is_multi_team_project(project.name)
+    )
+    if include_team_ownership:
+        source_paths.append(f"{resolved_tasks_root}/TEAM_OWNERSHIP.md")
+    if engineer.role in {"memory", "project-memory", "memory-oracle", "planner", "planner-dispatcher"}:
+        if f"{resolved_tasks_root}/STATUS.md" not in source_paths:
+            source_paths.append(f"{resolved_tasks_root}/STATUS.md")
     if engineer.role == "frontstage-supervisor":
         candidate = Path(project.repo_root) / "KODER.md"
         if candidate.exists():
@@ -891,16 +1501,32 @@ def workspace_contract_payload(
         roster = Path(resolved_tasks_root) / "FE-003-SPECIALIST-ROSTER.md"
         if roster.exists():
             source_paths.append(str(roster))
-    project_seat_map = [
-        line[2:]
-        for line in render_project_seat_map_lines(
-            session,
-            project,
-            engineer,
-            project_engineers=project_engineers,
-            engineer_order=engineer_order,
-        )
-        if line.startswith("- ")
+    for path in read_first_items:
+        if path not in source_paths:
+            source_paths.append(path)
+    project_seat_map: list[str] = []
+    for line in render_project_seat_map_lines(
+        session,
+        project,
+        engineer,
+        project_engineers=project_engineers,
+        engineer_order=engineer_order,
+    ):
+        if line.startswith("- "):
+            project_seat_map.append(line[2:])
+            continue
+        stripped = line.strip()
+        if stripped.startswith(("Seats:", "Boundary:")):
+            project_seat_map.append(stripped)
+    review_latest_integration = [
+        "Each ClawSeat project owns one project-local validation worktree for review/latest; never share it across projects.",
+        "Builders never merge review/latest or main.",
+        "Planner delivers branch/commit evidence, tests, and blockers; it does not merge review/latest.",
+        "Memory, or a user-authorized warden during patrol, integrates accepted planner deliveries into that project's own review/latest worktree.",
+        "Memory may merge from that project review/latest worktree to main only after explicit user confirmation.",
+        "Memory closeout records user confirmation, review/latest hash, and main merge hash or blocker.",
+        "Memory owns desktop launch scripts so user review opens this project's review/latest worktree, not main, a shared global worktree, or a stale tmp worktree.",
+        "On conflict: stop and report; no force-push and no main changes.",
     ]
     return {
         "engineer_id": session.engineer_id,
@@ -920,9 +1546,11 @@ def workspace_contract_payload(
                 engineer,
                 project.name,
                 template_name=str(getattr(project, "template_name", "") or ""),
+                seat_id=str(getattr(session, "engineer_id", "") or ""),
             )
             if line.startswith("- ")
         ],
+        "review_latest_integration": review_latest_integration,
         "source_paths": source_paths,
     }
 
@@ -968,6 +1596,7 @@ def render_workspace_contract_text(
         f"project_seat_map = {q_array([str(item) for item in payload['project_seat_map']])}",
         f"seat_boundary = {q_array([str(item) for item in payload['seat_boundary']])}",
         f"communication_protocol = {q_array([str(item) for item in payload['communication_protocol']])}",
+        f"review_latest_integration = {q_array([str(item) for item in payload['review_latest_integration']])}",
         f"source_paths = {q_array([str(item) for item in payload['source_paths']])}",
         "",
     ]
@@ -1131,7 +1760,7 @@ def render_profile_preserving_operator_edits(
 
     try:
         existing_text = target_path.read_text(encoding="utf-8")
-        existing = tomllib.loads(existing_text)
+        existing = _toml_loads(existing_text)
     except Exception as exc:
         print(
             f"WARNING [C14]: could not parse existing profile {target_path}: {exc}; "

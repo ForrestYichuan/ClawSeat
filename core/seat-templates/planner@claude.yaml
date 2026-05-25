@@ -1,0 +1,27 @@
+---
+template_name: planner@claude
+role: planner
+tool: claude
+provider: anthropic
+auth_mode: oauth_token
+default_model: claude-opus-4-7
+cost_class: high
+default_skills:
+  - planner
+  - clawseat-decision-escalation
+  - clawseat-privacy
+boot_command: "claude --workspace {workspace}"
+session_kind: tmux
+capabilities:
+  - workflow-authoring
+  - dispatch-orchestration
+  - fan-out-fan-in
+---
+
+# Planner seat (Claude Opus)
+
+Workflow author + dispatch orchestrator. In v3 multi-team mode pulls briefs
+from per-team queue, claims atomically, writes workflow.md, dispatches to
+specialists, fans in deliveries, routes acceptance to executor.
+
+Does NOT modify `brief.acceptance_criteria` (memory authority).

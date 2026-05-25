@@ -159,10 +159,14 @@ def test_resume_parser_accepts_fresh_flags() -> None:
     parser = build_parser(hooks)
 
     seat_args = parser.parse_args(["seat", "resume", "builder", "--fresh"])
+    liveness_args = parser.parse_args(["seat", "liveness", "--project", "install", "--seat", "builder", "--json"])
     project_args = parser.parse_args(["project", "resume", "install", "--fresh"])
 
     assert seat_args.seat == "builder"
     assert seat_args.fresh is True
+    assert liveness_args.project == "install"
+    assert liveness_args.seat == "builder"
+    assert liveness_args.as_json is True
     assert project_args.project == "install"
     assert project_args.fresh is True
 

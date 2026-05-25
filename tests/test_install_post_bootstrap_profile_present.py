@@ -42,7 +42,7 @@ def _run_fake_install(root: Path, home: Path, launcher_log: Path, tmux_log: Path
             "--project",
             project,
             "--template",
-            "clawseat-solo",
+            "clawseat-engineering",
             "--provider",
             "1",
         ],

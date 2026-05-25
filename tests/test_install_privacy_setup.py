@@ -7,6 +7,8 @@ import sys
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 _ISOLATION_HELPERS = Path(__file__).with_name("test_install_isolation.py")
 _isolation_spec = importlib.util.spec_from_file_location("_h3_install_isolation", _ISOLATION_HELPERS)
 assert _isolation_spec is not None
@@ -83,10 +85,16 @@ def _run_install(
     )
 
 
-def test_install_creates_privacy_template(tmp_path: Path) -> None:
-    root, home, py_stubs = _prepare_h3_fake_root(tmp_path)
+@pytest.fixture(scope="module")
+def default_privacy_install(tmp_path_factory: pytest.TempPathFactory) -> tuple[Path, Path]:
+    root, home, py_stubs = _prepare_h3_fake_root(tmp_path_factory.mktemp("h3privacy-default"))
     result = _run_install(root, home, py_stubs)
     assert result.returncode == 0, result.stderr
+    return root, home
+
+
+def test_install_creates_privacy_template(default_privacy_install: tuple[Path, Path]) -> None:
+    _root, home = default_privacy_install
     privacy = home / ".agents" / "memory" / "machine" / "privacy.md"
     assert privacy.is_file()
     text = privacy.read_text(encoding="utf-8")
@@ -95,10 +103,8 @@ def test_install_creates_privacy_template(tmp_path: Path) -> None:
     assert "BLOCK: ghp_" in text
 
 
-def test_install_privacy_template_mode_0600(tmp_path: Path) -> None:
-    root, home, py_stubs = _prepare_h3_fake_root(tmp_path)
-    result = _run_install(root, home, py_stubs)
-    assert result.returncode == 0, result.stderr
+def test_install_privacy_template_mode_0600(default_privacy_install: tuple[Path, Path]) -> None:
+    _root, home = default_privacy_install
     privacy = home / ".agents" / "memory" / "machine" / "privacy.md"
     assert stat.S_IMODE(privacy.stat().st_mode) == 0o600
 
@@ -114,10 +120,8 @@ def test_install_does_not_overwrite_existing_privacy_template(tmp_path: Path) ->
     assert privacy.read_text(encoding="utf-8") == "BLOCK: keep-me\n"
 
 
-def test_install_creates_deepseek_secret_template(tmp_path: Path) -> None:
-    root, home, py_stubs = _prepare_h3_fake_root(tmp_path)
-    result = _run_install(root, home, py_stubs)
-    assert result.returncode == 0, result.stderr
+def test_install_creates_deepseek_secret_template(default_privacy_install: tuple[Path, Path]) -> None:
+    _root, home = default_privacy_install
     secret = home / ".agent-runtime" / "secrets" / "claude" / "deepseek.env"
     assert secret.is_file()
     assert stat.S_IMODE(secret.stat().st_mode) == 0o600

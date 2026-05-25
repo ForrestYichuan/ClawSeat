@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import sys
 from dataclasses import dataclass, fields
 from pathlib import Path
@@ -106,6 +107,94 @@ def unresolved_tool_bins() -> list[str]:
     not be located on disk at import time). These will fail at exec time
     unless the user's PATH picks them up."""
     return sorted(name for name, src in _TOOL_BIN_SOURCES.items() if src == "bare")
+
+
+def check_script_deps() -> list[str]:
+    """Return list of missing Python pip-package names required by ClawSeat scripts.
+
+    These packages must be importable for agent_admin_brief, complete_handoff,
+    and related scripts to function. Empty return means all deps are present.
+    Call before claiming seat readiness; if non-empty, the seat should report
+    BLOCKED rather than summarising queue state from partial reads.
+    """
+    missing: list[str] = []
+    try:
+        import yaml  # noqa: F401
+    except ImportError:
+        missing.append("PyYAML")
+    # tomllib is stdlib in Python 3.11+; tomli is the backport for 3.9/3.10
+    try:
+        import tomllib  # noqa: F401
+    except ImportError:
+        try:
+            import tomli  # noqa: F401
+        except ImportError:
+            missing.append("tomli")
+    return missing
+
+
+# Ordered probe list for find_clawseat_python() — Homebrew-managed interpreters
+# that reliably ship with the required packages on macOS.
+_CLAWSEAT_PYTHON_FALLBACK_CANDIDATES: list[str] = [
+    "/opt/homebrew/opt/python@3.12/bin/python3.12",
+    "/opt/homebrew/opt/python@3.11/bin/python3.11",
+    "/opt/homebrew/bin/python3",
+]
+
+
+def _can_import_pytest(exe: str) -> bool:
+    """Return True if *exe* can import pytest."""
+    try:
+        r = subprocess.run(
+            [exe, "-c", "import pytest"],
+            capture_output=True,
+            timeout=5,
+        )
+        return r.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def _exe_is_clawseat_ready(exe: str) -> bool:
+    """Return True if *exe* has tomllib/tomli AND pytest installed."""
+    # check_script_deps tests the current process; here we probe a specific exe
+    for mod_group in [["tomllib", "tomli"], ["pytest"]]:
+        found = False
+        for mod in mod_group:
+            try:
+                r = subprocess.run(
+                    [exe, "-c", f"import {mod}"],
+                    capture_output=True,
+                    timeout=5,
+                )
+                if r.returncode == 0:
+                    found = True
+                    break
+            except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+                pass
+        if not found:
+            return False
+    return True
+
+
+def find_clawseat_python() -> str:
+    """Return a Python interpreter ready to run ClawSeat acceptance tests.
+
+    Requires: tomllib/tomli (TOML parsing) + pytest (test runner).
+    Checks sys.executable first, then probes _CLAWSEAT_PYTHON_FALLBACK_CANDIDATES.
+    Falls back to sys.executable when no better interpreter is found so callers
+    always receive a usable path (they can separately report missing deps).
+
+    Policy: mechanical acceptance commands must use this path rather than bare
+    ``python3`` / ``/usr/bin/python3`` so they are deterministic across Claude/
+    Codex/Gemini isolated shells that may not have pytest installed.
+    """
+    if _exe_is_clawseat_ready(sys.executable):
+        return sys.executable
+    for candidate in _CLAWSEAT_PYTHON_FALLBACK_CANDIDATES:
+        if candidate != sys.executable and _exe_is_clawseat_ready(candidate):
+            return candidate
+    return sys.executable
 
 
 def _default_path() -> str:
@@ -343,6 +432,7 @@ PROVIDER_DEFAULTS = {
         },
         "xcode-best": {
             "base_url": "https://xcode.best",
+            "default_model": "gpt-5.5",
             "url_markers": ("xcode.best",),
         },
         "ccr-local": {
@@ -436,6 +526,15 @@ CLAUDE_API_PROVIDER_CONFIGS = {
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
         },
     },
+    "deepseek": {
+        "model": PROVIDER_DEFAULTS["claude"]["deepseek"]["default_model"],
+        "base_url": PROVIDER_DEFAULTS["claude"]["deepseek"]["base_url"],
+        "auth_token_var": "DEEPSEEK_API_KEY",
+        "extra_env": {
+            "API_TIMEOUT_MS": "3000000",
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+        },
+    },
     "ark": {
         "model": PROVIDER_DEFAULTS["claude"]["ark"]["default_model"],
         "base_url": PROVIDER_DEFAULTS["claude"]["ark"]["base_url"],
@@ -444,6 +543,15 @@ CLAUDE_API_PROVIDER_CONFIGS = {
         # ~/.agent-runtime/secrets/claude/ark.env. Session startup aliases
         # that name into launcher custom env at runtime.
         "auth_token_var": "ARK_API_KEY",
+        "extra_env": {
+            "API_TIMEOUT_MS": "3000000",
+            "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+        },
+    },
+    "xcode-best": {
+        "model": PROVIDER_DEFAULTS["claude"]["xcode-best"]["default_model"],
+        "base_url": PROVIDER_DEFAULTS["claude"]["xcode-best"]["base_url"],
+        "auth_token_var": "XCODE_BEST_API_KEY",
         "extra_env": {
             "API_TIMEOUT_MS": "3000000",
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
@@ -569,8 +677,33 @@ def supported_providers(tool: str, auth_mode: str) -> tuple[str, ...]:
     return SUPPORTED_RUNTIME_MATRIX.get(tool, {}).get(auth_mode, ())
 
 
+def _is_claude_api_registry_provider(provider: str) -> bool:
+    """Check whether a provider name is registered in the local provider registry
+    with tool=claude.  Used as a fallback by is_supported_runtime_combo so that
+    operators can use saved API providers (e.g. baidu-glm, newapi-local-claude)
+    without having to hardcode them in the static SUPPORTED_RUNTIME_MATRIX.
+
+    Fails silently (returns False) if the registry is unavailable, so the
+    static matrix path is always the primary gate.
+    """
+    try:
+        from providers import get_provider  # noqa: PLC0415
+        p = get_provider(provider)
+        return p is not None and str(getattr(p, "tool", "") or "") == "claude"
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def is_supported_runtime_combo(tool: str, auth_mode: str, provider: str) -> bool:
-    return provider in supported_providers(tool, auth_mode)
+    if provider in supported_providers(tool, auth_mode):
+        return True
+    # For claude/api, also accept providers registered in the local provider
+    # registry with tool=claude.  This allows operators to register custom
+    # API providers (baidu-glm, newapi-local-claude, etc.) without requiring
+    # a framework update for every new Claude-compatible endpoint.
+    if tool == "claude" and auth_mode == "api":
+        return _is_claude_api_registry_provider(provider)
+    return False
 
 
 def supported_runtime_summary_lines() -> list[str]:

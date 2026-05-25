@@ -12,10 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover
-    import tomli as tomllib
+from _toml_compat import loads_safe as _toml_loads, load_safe as _toml_load
 
 
 SCHEMA_VERSION = 2
@@ -317,7 +314,7 @@ def validate_registry_vs_project_toml(
     if not path.exists():
         return [f"project.toml missing for {project}: {path}"]
     with path.open("rb") as handle:
-        project_data = tomllib.load(handle)
+        project_data = _toml_load(handle)
     primary = _primary_from_toml(project_data)
     if primary and entry.primary_seat != primary:
         warnings.append(

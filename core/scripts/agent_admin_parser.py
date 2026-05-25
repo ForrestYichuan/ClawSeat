@@ -11,6 +11,12 @@ class ParserHooks:
     cmd_list_projects: Callable[[Any], int]
     cmd_list_engineers: Callable[[Any], int]
     cmd_list_identities: Callable[[Any], int]
+    cmd_provider_list: Callable[[Any], int]
+    cmd_provider_get: Callable[[Any], int]
+    cmd_provider_add: Callable[[Any], int]
+    cmd_provider_update: Callable[[Any], int]
+    cmd_provider_remove: Callable[[Any], int]
+    cmd_provider_rename: Callable[[Any], int]
     cmd_show_project: Callable[[Any], int]
     cmd_show_engineer: Callable[[Any], int]
     cmd_show: Callable[[Any], int]
@@ -22,6 +28,7 @@ class ParserHooks:
     cmd_session_name: Callable[[Any], int]
     cmd_project_open: Callable[[Any], int]
     cmd_seat_resume: Callable[[Any], int]
+    cmd_seat_liveness: Callable[[Any], int]
     cmd_project_current: Callable[[Any], int]
     cmd_project_use: Callable[[Any], int]
     cmd_project_create: Callable[[Any], int]
@@ -72,6 +79,18 @@ class ParserHooks:
     cmd_machine_memory_show: Callable[[Any], int]
     cmd_project_seat_list: Callable[[Any], int]
     cmd_project_validate: Callable[[Any], int]
+    # v3 brief / queue commands (spec §4.2 §4.3)
+    cmd_brief_queue: Callable[[Any], int]
+    cmd_brief_list: Callable[[Any], int]
+    cmd_brief_claim: Callable[[Any], int]
+    cmd_brief_reset: Callable[[Any], int]
+    cmd_brief_requeue: Callable[[Any], int]
+    cmd_brief_start: Callable[[Any], int]
+    cmd_brief_show: Callable[[Any], int]
+    cmd_brief_done: Callable[[Any], int]
+    cmd_brief_planner_status: Callable[[Any], int]
+    # v3 acceptance executor (Phase 2, spec §4.7)
+    cmd_acceptance_run: Callable[[Any], int]
 
 
 def build_parser(hooks: ParserHooks) -> argparse.ArgumentParser:
@@ -91,6 +110,54 @@ def build_parser(hooks: ParserHooks) -> argparse.ArgumentParser:
 
     list_identities = sub.add_parser("list-identities", help="List configured tool identities.")
     list_identities.set_defaults(func=hooks.cmd_list_identities)
+
+    provider = sub.add_parser("provider", help="Provider SSOT registry and secret-file operations.")
+    provider_sub = provider.add_subparsers(dest="provider_command", required=True)
+
+    provider_list = provider_sub.add_parser("list", help="List configured providers.")
+    provider_list.add_argument("--tool", choices=["claude", "codex", "gemini"])
+    provider_list.add_argument("--json", action="store_true")
+    provider_list.set_defaults(func=hooks.cmd_provider_list)
+
+    provider_get = provider_sub.add_parser("get", help="Show one provider record.")
+    provider_get.add_argument("--name", required=True)
+    provider_get.add_argument("--json", action="store_true")
+    provider_get.set_defaults(func=hooks.cmd_provider_get)
+
+    provider_add = provider_sub.add_parser("add", help="Add one provider record.")
+    provider_add.add_argument("--name", required=True)
+    provider_add.add_argument("--tool", required=True, choices=["claude", "codex", "gemini"])
+    provider_add.add_argument("--kind", required=True, choices=["api_key", "oauth_token"])
+    provider_add.add_argument(
+        "--family",
+        required=True,
+        choices=["anthropic", "minimax", "deepseek", "xcode-best", "openai", "openai-compat", "gemini"],
+    )
+    provider_add.add_argument("--base-url", default="")
+    provider_add.add_argument("--model", default="")
+    provider_add.add_argument("--secret-stdin", action="store_true", required=True)
+    provider_add.add_argument("--json", action="store_true")
+    provider_add.set_defaults(func=hooks.cmd_provider_add)
+
+    provider_update = provider_sub.add_parser("update", help="Update provider metadata or secret.")
+    provider_update.add_argument("--name", required=True)
+    provider_update.add_argument("--base-url")
+    provider_update.add_argument("--model")
+    provider_update.add_argument("--secret-stdin", action="store_true")
+    provider_update.add_argument("--json", action="store_true")
+    provider_update.set_defaults(func=hooks.cmd_provider_update)
+
+    provider_remove = provider_sub.add_parser("remove", help="Remove one provider record.")
+    provider_remove.add_argument("--name", required=True)
+    provider_remove.add_argument("--force", action="store_true")
+    provider_remove.add_argument("--json", action="store_true")
+    provider_remove.set_defaults(func=hooks.cmd_provider_remove)
+
+    provider_rename = provider_sub.add_parser("rename", help="Rename one provider record.")
+    provider_rename.add_argument("--from", dest="from_name", required=True)
+    provider_rename.add_argument("--to", dest="to_name", required=True)
+    provider_rename.add_argument("--json", action="store_true")
+    provider_rename.set_defaults(func=hooks.cmd_provider_rename)
 
     show_project = sub.add_parser("show-project", help="Show one project record.")
     show_project.add_argument("project")
@@ -388,6 +455,21 @@ def build_parser(hooks: ParserHooks) -> argparse.ArgumentParser:
     )
     seat_resume.set_defaults(func=hooks.cmd_seat_resume)
 
+    seat_liveness = seat_sub.add_parser(
+        "liveness",
+        help="Show live seats for a project from heartbeat/state records.",
+    )
+    seat_liveness.add_argument("--project", required=True)
+    seat_liveness.add_argument("--seat", default=None, help="Optional seat/role filter.")
+    seat_liveness.add_argument(
+        "--max-age-seconds",
+        type=int,
+        default=300,
+        help="Heartbeat freshness window in seconds (default: 300).",
+    )
+    seat_liveness.add_argument("--json", action="store_true", dest="as_json")
+    seat_liveness.set_defaults(func=hooks.cmd_seat_liveness)
+
     # P1 layered-model: machine ... (§3).
     machine = sub.add_parser("machine", help="Machine-layer operations.")
     machine_sub = machine.add_subparsers(dest="machine_command", required=True)
@@ -683,6 +765,211 @@ def build_parser(hooks: ParserHooks) -> argparse.ArgumentParser:
     task_update_status.add_argument("status", choices=["pending", "in_progress", "done", "blocked"])
     task_update_status.add_argument("--project", required=True)
     task_update_status.set_defaults(func=hooks.cmd_task_update_status)
+
+    # v3 brief subcommand — memory writes brief + queue events, planner pulls.
+    # Spec §4.2 (brief schema) + §4.3 (queue events).
+    brief = sub.add_parser(
+        "brief",
+        help="v3 multi-team brief/queue ops (memory writes brief, planner claims).",
+    )
+    brief_sub = brief.add_subparsers(dest="brief_command", required=True)
+
+    brief_queue = brief_sub.add_parser(
+        "queue",
+        help="Write brief markdown + append task_created event to per-team queue.",
+    )
+    brief_queue.add_argument("--project", required=True)
+    brief_queue.add_argument("--team", required=True)
+    brief_queue.add_argument("--task-id", required=True, dest="task_id")
+    brief_queue.add_argument("--objective", required=True)
+    brief_queue.add_argument("--depends-on", nargs="*", default=[], dest="depends_on")
+    brief_queue.add_argument(
+        "--seats-required",
+        nargs="*",
+        default=None,
+        dest="seats_required",
+        help="Seats required (default: ['builder']). Schema requires non-empty.",
+    )
+    brief_queue.add_argument("--parent-task-id", default=None, dest="parent_task_id")
+    brief_queue.add_argument(
+        "--brief-content-file",
+        default=None,
+        dest="brief_content_file",
+        help="Optional path to pre-written brief markdown (overrides skeleton).",
+    )
+    brief_queue.add_argument("--force", action="store_true", help="Overwrite existing brief.")
+    brief_queue.add_argument(
+        "--no-wake",
+        action="store_true",
+        help="Append the queue event without waking the team planner.",
+    )
+    brief_queue.add_argument(
+        "--allow-open",
+        action="store_true",
+        help="Explicitly allow queueing while this team has another open task.",
+    )
+    brief_queue.set_defaults(func=hooks.cmd_brief_queue)
+
+    brief_list = brief_sub.add_parser(
+        "list",
+        help="List tasks for a team (default: pending only; --all shows all).",
+    )
+    brief_list.add_argument("--project", required=True)
+    brief_list.add_argument("--team", required=True)
+    brief_list.add_argument("--all", action="store_true")
+    brief_list.set_defaults(func=hooks.cmd_brief_list)
+
+    brief_claim = brief_sub.add_parser(
+        "claim",
+        help="Planner claims a pending task (validates depends_on).",
+    )
+    brief_claim.add_argument("--project", required=True)
+    brief_claim.add_argument("--team", required=True)
+    brief_claim.add_argument("--task-id", required=True, dest="task_id")
+    brief_claim.add_argument(
+        "--actor",
+        required=True,
+        help="Format: <role>@<tool>, e.g. planner@claude",
+    )
+    brief_claim.set_defaults(func=hooks.cmd_brief_claim)
+
+    brief_reset = brief_sub.add_parser(
+        "reset",
+        help="Append task_reset for a recoverable brief task.",
+    )
+    brief_reset.add_argument("--project", required=True)
+    brief_reset.add_argument("--team", required=True)
+    brief_reset.add_argument("--task-id", required=True, dest="task_id")
+    brief_reset.add_argument(
+        "--actor",
+        default="memory",
+        help="Actor for task_reset (default: memory).",
+    )
+    brief_reset.add_argument(
+        "--reason",
+        required=True,
+        help="Short reset reason for the queue event.",
+    )
+    brief_reset.set_defaults(func=hooks.cmd_brief_reset)
+
+    brief_requeue = brief_sub.add_parser(
+        "requeue",
+        help="Recover a blocked/reset task with its existing brief, then wake planner.",
+    )
+    brief_requeue.add_argument("--project", required=True)
+    brief_requeue.add_argument("--team", required=True)
+    brief_requeue.add_argument("--task-id", required=True, dest="task_id")
+    brief_requeue.add_argument(
+        "--actor",
+        default="memory",
+        help="Actor for recovery events (default: memory).",
+    )
+    brief_requeue.add_argument(
+        "--reason",
+        default="requeue after brief repair",
+        help="Reset reason if the task is currently waiting_for.",
+    )
+    brief_requeue.add_argument(
+        "--no-wake",
+        action="store_true",
+        help="Recover the queue event without waking the team planner.",
+    )
+    brief_requeue.set_defaults(func=hooks.cmd_brief_requeue)
+
+    brief_start = brief_sub.add_parser(
+        "start",
+        help="Mark a claimed brief task as task_in_progress.",
+    )
+    brief_start.add_argument("--project", required=True)
+    brief_start.add_argument("--team", required=True)
+    brief_start.add_argument("--task-id", required=True, dest="task_id")
+    brief_start.add_argument(
+        "--actor",
+        required=True,
+        help="Format: <role>@<tool>, e.g. planner@claude",
+    )
+    brief_start.set_defaults(func=hooks.cmd_brief_start)
+
+    brief_show = brief_sub.add_parser(
+        "show",
+        help="Show current state (collapsed) of a task_id in the queue.",
+    )
+    brief_show.add_argument("--project", required=True)
+    brief_show.add_argument("--team", required=True)
+    brief_show.add_argument("--task-id", required=True, dest="task_id")
+    brief_show.set_defaults(func=hooks.cmd_brief_show)
+
+    brief_done = brief_sub.add_parser(
+        "done",
+        help="Mark a brief task_done PASS after planner final closeout.",
+    )
+    brief_done.add_argument("--project", required=True)
+    brief_done.add_argument("--team", required=True)
+    brief_done.add_argument("--task-id", required=True, dest="task_id")
+    brief_done.add_argument(
+        "--actor",
+        required=True,
+        help="Format: <role>@<tool>, e.g. planner@claude",
+    )
+    brief_done.add_argument(
+        "--verdict",
+        default="PASS",
+        choices=["PASS"],
+        help="Only PASS is accepted for task_done.",
+    )
+    brief_done.set_defaults(func=hooks.cmd_brief_done)
+
+    brief_planner_status = brief_sub.add_parser(
+        "planner-status",
+        help="Print a status snapshot for all planner teams in a project.",
+    )
+    brief_planner_status.add_argument("--project", required=True)
+    brief_planner_status.add_argument(
+        "--json", action="store_true", help="Emit JSON instead of plain text"
+    )
+    brief_planner_status.set_defaults(func=hooks.cmd_brief_planner_status)
+
+    # v3 acceptance executor (Phase 2, spec §4.7)
+    acceptance = sub.add_parser(
+        "acceptance",
+        help="v3 acceptance executor (mechanical / reviewer / operator routes).",
+    )
+    acceptance_sub = acceptance.add_subparsers(dest="acceptance_command", required=True)
+
+    acceptance_run = acceptance_sub.add_parser(
+        "run",
+        help="Run brief.acceptance_criteria for a task; physically execute mechanical commands, route reviewer/operator items.",
+    )
+    acceptance_run.add_argument("--project", required=True)
+    acceptance_run.add_argument("--team", required=True)
+    acceptance_run.add_argument("--task-id", required=True, dest="task_id")
+    acceptance_run.add_argument("--brief-path", default=None, dest="brief_path",
+                                help="Explicit brief path (default: tasks/<p>/<t>/brief/<task_id>.md)")
+    acceptance_run.add_argument("--reviewer-seat", default=None, dest="reviewer_seat")
+    acceptance_run.add_argument("--cwd", default=None, help="Working dir for mechanical commands")
+    acceptance_run.add_argument("--profile", default=None, dest="profile",
+                                help="Profile path for reviewer dispatch (default: ~/.agents/profiles/<project>-profile-dynamic.toml)")
+    acceptance_run.add_argument(
+        "--actor",
+        default="planner@claude",
+        help="Queue actor for automatic task_done on aggregate PASS.",
+    )
+    acceptance_run.add_argument(
+        "--skip-queue-done",
+        action="store_true",
+        help="Do not append task_done when aggregate acceptance verdict is PASS.",
+    )
+    acceptance_run.add_argument(
+        "--baseline-criteria",
+        default=None,
+        dest="baseline_criteria",
+        help=(
+            "Comma-separated 0-based indices of mechanical criteria to treat as "
+            "diagnostic/non-blocking baseline evidence. Non-zero exit is recorded as "
+            "'diagnostic' and does not contribute to aggregate FAIL."
+        ),
+    )
+    acceptance_run.set_defaults(func=hooks.cmd_acceptance_run)
 
     identity = sub.add_parser("identity", help="Tool identity list/show operations.")
     identity_sub = identity.add_subparsers(dest="identity_command", required=True)

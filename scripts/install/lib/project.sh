@@ -33,7 +33,7 @@ prompt_template_for_choice() {
   case "${1:-1}" in
     ""|1) printf '%s\n' "clawseat-engineering" ;;
     2) printf '%s\n' "clawseat-creative" ;;
-    3) printf '%s\n' "clawseat-solo" ;;
+    3) printf '%s\n' "clawseat-minimal" ;;
     *) return 1 ;;
   esac
 }
@@ -42,7 +42,7 @@ prompt_placeholder_for_template() {
   case "$1" in
     clawseat-engineering) printf '%s\n' "e.g. coding-project, webapp" ;;
     clawseat-creative)    printf '%s\n' "e.g. cartooner-project, creative-campaign" ;;
-    clawseat-solo)        printf '%s\n' "e.g. minimal-solo, creative-side-project" ;;
+    clawseat-minimal|clawseat-solo) printf '%s\n' "e.g. minimal-project, cartooner-front" ;;
     *)                    printf '%s\n' "e.g. myproject, experiment-01" ;;
   esac
 }
@@ -59,7 +59,7 @@ prompt_kind_first_flow() {
   printf '\n%s\n' "$(_prompt_i18n_get kind_first_prompt '选择项目类型 / Choose project mode:')" >&2
   printf '  %s\n' "$(_prompt_i18n_get kind_first_creative '1) 创作项目 (5 seat: memory + planner + builder + patrol + designer)  [default]')" >&2
   printf '  %s\n' "$(_prompt_i18n_get kind_first_engineering '2) 工程项目 (6 seat: + reviewer 独立审查)')" >&2
-  printf '  %s\n' "$(_prompt_i18n_get kind_first_solo '3) 极简协作 (3 seat: memory + builder + planner-gemini, all OAuth)')" >&2
+  printf '  %s\n' "$(_prompt_i18n_get kind_first_solo '3) 极简项目组 (v3 multi-team: memory + planner+builder subteam + quality-docs)')" >&2
   printf '  %s\n' "$(_prompt_i18n_get kind_first_cartooner '4) Cartooner 创作席位 (4 seat: memory+writer+visual+patrol，工具混合)')" >&2
   printf '%s\n' "$(_prompt_i18n_get kind_first_recommend '推荐★：创作项目；理由：覆盖 planner/builder/patrol/designer，最适合首次安装。')" >&2
 

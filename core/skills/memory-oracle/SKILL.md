@@ -1,13 +1,6 @@
 ---
 name: memory-oracle
-description: >
-  Federated memory oracle for synthesizing machine facts, project knowledge,
-  and cross-seat conclusions from durable KB files. Use when a workflow needs
-  remembered facts, orphan knowledge recovery, project-history synthesis, or
-  evidence-backed answers from ~/.agents/memory. Also use when memory must
-  reconcile findings across seats. Covers KB search, structured synthesis, and
-  memory write/read guidance. Do NOT use for live implementation, dispatch
-  ownership, Feishu messaging, or guessing facts without stored evidence.
+description: "Federated memory oracle: synthesizes facts from ~/.agents/memory KB and preserves operator/warden brief intent during project-memory handoffs. Use when remembered facts, project-history synthesis, cross-seat evidence, queue-state context, or closeout recall are needed. Do not use for implementation, direct specialist work, or guessed facts."
 ---
 
 # Memory Oracle (v0.8 — Federated KB Synthesizer)
@@ -55,43 +48,77 @@ Memory 被动读取的知识来自各席位 domain KB：
 
 ## KB 触发点 (v0.8)
 
-Memory dispatches a task via `dispatch_task.py` 时，SHOULD 调用
-`clawseat-intake/scripts/decision-log.py append` 记录派工决策到
-当前 project 的 `~/.agents/memory/projects/<project>/decision/`（Memory 的孤儿知识层）。
+Memory 向 v3 multi-team planner 派任务时，必须通过 `agent_admin.py brief queue`
+写入队列。Memory SHOULD 同步调用 `clawseat-intake/scripts/decision-log.py append`
+记录派工决策到当前 project 的
+`~/.agents/memory/projects/<project>/decision/`（Memory 的孤儿知识层）。
 Planner 写自己的 `~/.agents/memory/projects/<project>/planner/`，不是 Memory 的职责。
 
-## Dispatch Protocol & Absent-Planner Fallback
+## Brief Fidelity Boundary
 
-Canonical task dispatch is the gstack harness helper:
+Memory owns patrol, durable memory, queue/state tracking, acceptance
+consumption, and `review/latest` integration tracking. It does not own
+reinterpretation of product intent when an operator/warden supplies a brief or
+root-cause report.
+
+- Preserve supplied `Goal`, `Context`, `Boundary`, `Anti-goal`, and
+  `Acceptance` when queueing work; add only task id, team, seats, dependencies,
+  and acceptance routing metadata. Add mechanical checks only when there is a
+  real deterministic command.
+- Do not weaken user-visible outcomes into a convenient implementation. If the
+  brief says "inside the project sidebar", "a separate overlay entry" is not an
+  equivalent interpretation unless the brief allows it.
+- If product intent is ambiguous and no compact brief exists, ask for one or
+  ask the operator/warden to clarify the user-visible outcome and anti-goals.
+- During closeout, compare planner delivery against the supplied outcome and
+  anti-goal, not just queue PASS and test output.
+
+## Planner Selection Boundary
+
+Memory chooses the target queue with a status-gate-first,
+capability-second policy:
+
+- Before queueing, read `planner-status`.
+- Apply the status gate first: context-hot + integrated, then idle clean, then
+  anything else only with explicit operator/warden acceptance.
+- Treat `TEAM_OWNERSHIP.md`, project `purpose`, and capabilities as
+  tie-breakers inside the same status tier, not ownership locks. Never use
+  them to bypass a cleaner planner or to route to busy, dirty, or
+  `idle_unmerged` by default.
+- A warden/operator brief that names a team wins only when that team is not
+  blocked; if it is busy, dirty, or `idle_unmerged`, report the risk before
+  queueing.
+- Keep weak-model briefs small and bounded; route hard root-cause work to the
+  strongest suitable available model within the allowed status tier.
+- Watchdog/tmux captures are observations for liveness, errors, and
+  waiting-input only; never derive dispatch policy or protocol rules from
+  captured model prose.
+
+## v3 Planner Dispatch Protocol & Absent-Planner Fallback
+
+Canonical v3 memory→planner dispatch is the brief queue helper:
 
 ```bash
-python3 core/skills/gstack-harness/scripts/dispatch_task.py \
-  --profile ~/.agents/profiles/<project>-profile-dynamic.toml \
-  --source memory \
-  --target <seat> \
-  --task-id <id> \
-  --title "<title>" \
-  --objective "<objective>" \
-  --test-policy EXTEND \
-  --reply-to planner
+python3 core/scripts/agent_admin.py brief queue \
+  --project <project> \
+  --team <team> \
+  --task-id <task_id> \
+  --objective "<one-line objective>" \
+  --seats-required planner
 ```
 
-The real CLI requires `--profile`, one of `--target` or `--target-role`,
-`--task-id`, `--title`, `--objective`, and `--test-policy
-{UPDATE,FREEZE,EXTEND,N/A}`. It writes the handoff record under
-`~/.agents/tasks/<project>/patrol/handoffs/<task_id>__<source>__<target>.json`
-and then notifies the target unless `--no-notify` is used. The profile path is
-not optional: missing `~/.agents/profiles/<project>-profile-dynamic.toml` will
-break dispatch before the task has durable context.
+The queue CLI writes the brief, appends `task_created`, and wakes the selected
+planner. `dispatch_task.py` remains valid for planner-owned downstream handoffs
+and legacy v2 workflows; runtime rejects v3 memory→planner use because it
+creates split-brain state between handoff receipts and the team queue.
 
-`send-and-verify.sh` does not replace `dispatch_task.py`:
+`send-and-verify.sh` does not replace the queue command:
 
 - `send-and-verify.sh` is a wake-up transport for an existing seat. It sends
   text and verifies the tmux input buffer did not strand it.
-- It does not create a handoff record, does not define `task_id`, and does not
+- It does not create a queue event, does not define `task_id`, and does not
   tell the target where to deliver.
-- Use it when planner or patrol is already present and owns the actual
-  `dispatch_task.py` call.
+- Use it only when a durable queued task already exists and the wake hook failed.
 - Do not use it to send work directly from memory to builder when planner or
   the dynamic profile is absent.
 
@@ -101,51 +128,79 @@ Absent-planner fallback:
    not chain orchestration.
 2. Do not hand-write `TODO.md` as a replacement for the canonical handoff.
 3. Escalate to the operator with a concise blocked report: planner unavailable,
-   dispatch blocked, likely causes include missing profile-dynamic.toml,
+   queue wake failed, likely causes include missing profile-dynamic.toml,
    planner crash, or missing tmux session.
 4. If the root cause is
    `FileNotFoundError: <project>-profile-dynamic.toml`, fix the project profile
    first, normally with `bash ~/ClawSeat/scripts/install.sh --project <project>
    --reinstall`, then rerun the dispatch.
 
-Verify Ack 4-step after dispatch:
+Verify queued dispatch:
 
-1. `ls -lat ~/.agents/tasks/<project>/patrol/handoffs/`
-2. `tmux capture-pane -t $(agentctl session-name <seat> --project <project>) -p | tail -30`
-3. `cat ~/.agents/tasks/<project>/<seat>/DELIVERY.md`
-4. `git fetch <remote> <branch> && git log <remote>/<branch> --oneline -5`
+1. `agent_admin.py brief planner-status --project <project>`
+2. Confirm the target team has the new `latest=<task_id> [task_created|task_claimed|task_in_progress]`.
+3. If wake failed, inspect the planner pane and the target team's `tasks.queue.jsonl`.
+4. After queue-drained relay, read planner `DELIVERY.md`, acceptance records, and `review/latest`.
 
-Treat missing handoff, silent target pane, absent delivery, or absent remote
-commit as an unacknowledged dispatch until proven otherwise.
+Treat missing queue state, silent target pane, absent delivery, or missing
+`review/latest` evidence as an unacknowledged task until proven otherwise.
 
-## Canonical Workflow Entry (memory dispatch 必走步)
+## Canonical Brief Queue Entry (v3 multi-team, memory 必走步)
 
-Before notifying planner of a new task, memory MUST create canonical workflow
-state first:
+Memory queues briefs into the per-team queue. Planner pulls via 60s poll +
+SessionStart hook. No workflow.md authored by memory — planner writes it
+from the claimed brief (spec §5.1, §5.2).
 
 ```bash
-# 1. Create workflow.md as the chain state file.
-python3 core/scripts/agent_admin.py task create \
-  --project <p> \
-  --workflow-template brief-driven \
-  <task_id>
+# 1. Append brief + task_created event to per-team queue.
+python3 core/scripts/agent_admin.py brief queue \
+  --project <p> --team <t> \
+  --task-id <task_id> \
+  --objective "<one-line objective>" \
+  --seats-required builder reviewer \
+  --depends-on <upstream_task_ids…>
 
-# 2. Edit workflow.md so brief modules become steps.
-# Required per step: owner_role, mode, status, and notify_on_done: [memory].
-# Reference: core/skills/planner/references/workflow-doc-schema.md
+# 2. Preserve supplied acceptance criteria. Add or normalize only route metadata
+#    (mechanical / reviewer / operator) when needed; pure review/operator tasks
+#    do not need fake mechanical commands.
+$EDITOR ~/.agents/tasks/<p>/<t>/brief/<task_id>.md
 
-# 3. Then wake planner.
-send-and-verify.sh --project <p> planner \
-  "[<task_id>] workflow.md ready, brief: <path>"
+# 3. No explicit wake-up needed — planner's SessionStart hook + 60s poll
+#    will pick the task up automatically. If planner is offline, install
+#    the hook via core/skills/planner/scripts/install_queue_poll.py.
 ```
 
-Why: `workflow.md` is the chain canonical state file. It enables patrol step
-monitoring, `notify_on_done: [memory]` routing, planner SWALLOW fallback
-decisions, and cross-seat dependency tracking.
+Why: queue + event stream is the v3 canonical state (spec §4.3). Memory does
+NOT write `workflow.md`; planner authors it after `agent_admin brief claim`.
+Memory's ownership boundary:
 
-**禁止短路**: `send-and-verify.sh --project <p> planner "<inline brief>"`
-before workflow.md exists skips canonical state. Use send-and-verify only as
-the wake-up transport after workflow.md is ready.
+- **QUEUES/PRESERVES** operator/warden-authored product intent and writes
+  routing metadata; it does not rewrite supplied acceptance
+- **CONSUMES** planner's chain-end relay + acceptance receipts
+- **NEVER RUNS** `agent_admin acceptance run` directly — that is planner's job
+  between final workflow step and chain-end relay (planner SKILL.md
+  §Workflow Authoring + planner-brief-parsing-contract.md §4)
+
+**Legacy `agent_admin task create --workflow-template`** is retained for
+single-team v2 projects only. v3 multi-team projects use `brief queue` above.
+
+### Memory consumes planner's chain-end relay (not run acceptance itself)
+
+After planner runs `agent_admin acceptance run`, planner relays the verdict
+to memory via `complete_handoff.py`. Memory then:
+
+1. Reads `tasks/<p>/<t>/acceptance/<task_id>__{mechanical,reviewer,operator}.json`
+   to inspect the routed outcomes.
+2. If aggregate verdict is PASS → memory commits the chain to KB
+   (decision/finding) and may merge to main (spec §8 git flow).
+3. If aggregate is FAIL → memory writes a new brief (parent_task_id linkage)
+   with corrected acceptance and re-queues.
+4. If aggregate is PENDING and receipt carries `lineage_status: divergent` →
+   memory routes through PASS_NEEDS_INTEGRATION three-lane handler
+   (spec §C / DO spec): rebase / integration-branch / disposable retry.
+
+Memory does NOT shell out `acceptance run` — that would short-circuit the
+planner's chain. Planner is the seat that runs it; memory is the consumer.
 
 ## PASS_NEEDS_INTEGRATION 三档恢复
 When `PASS_NEEDS_INTEGRATION` appears, memory owns the three-lane recovery:
@@ -153,13 +208,31 @@ light land a local `memory_commit`, medium dispatch builder repair, heavy
 escalate to operator. Keep the signal one-way; do not bounce it back to the
 builder seat.
 
-## Post-Spawn Chain Rehearsal (必做)
+## Canonical Workflow Entry
 
-memory MUST initiate a chain rehearsal brief in these situations:
+For single-team v2 workflows only, memory may use the legacy workflow entry:
+
+1. Create workflow.md with `agent_admin.py task create --workflow-template ...`.
+2. Edit workflow.md until `workflow.md ready`, including `notify_on_done: [memory]`.
+3. Then wake planner through the canonical transport.
+
+禁止短路: do not send builder work directly, do not skip planner, and do not
+replace workflow.md with ad hoc pane text. v3 multi-team work uses `brief queue`.
+
+## Readiness / Chain Rehearsal
+
+Do not run heavy rehearsal on every wake. No topology change means
+`planner-status` plus queue/tmux consistency is enough.
+
+Memory MUST verify readiness before real dispatch in these situations:
 
 1. After install.sh / reinstall, once Phase-A kickoff is received and the
    project seats are confirmed live.
 2. When a seat is restarted and a new instance joins the chain.
+3. When teams/seats/topology changed since the previous successful check.
+
+Use the lightweight path first. Run full Post-Spawn Chain Rehearsal only when
+the contract changed or status is ambiguous.
 
 **Template**: see `references/post-spawn-chain-rehearsal-template.md`
 
@@ -240,7 +313,10 @@ Memory loads two companion skills:
   goal-drift recall.
 
 Koder loads `clawseat-intake` but not `memory-report-mode`; planner does
-not load either for high-context operator work. Spec authority: memory authors/verifies task SPEC.md via `core/scripts/spec_admin.py`; full protocol in [`references/spec-authority.md`](references/spec-authority.md).
+not load either for high-context operator work. Brief/spec authority: when an
+operator/warden-authored brief exists, memory preserves it and adds only queue
+metadata. If no compact brief exists, memory asks for one instead of inventing
+product intent via `spec_admin.py`.
 
 ## Decision Payload Output
 
@@ -255,32 +331,19 @@ send.
 
 ## 目录布局（v0.8）
 
-```text
-~/.agents/memory/
-├── machine/<*.json>  credentials / network / openclaw / github / current_context
-├── learnings/        跨项目模式（如有）
-├── shared/           library_knowledge / patterns / examples
-├── index.json        scan_index.py 全局综合索引
-├── events.log        全局 append-only JSONL
-├── responses/<task_id>.json  memory_deliver.py 输出
-└── projects/<project>/{dev_env.json,decision/,finding/,task/,plan/,builder/,planner/,reviewer/,patrol/, _index/}
-```
+`~/.agents/memory/` contains `machine/*.json`, `learnings/`, `shared/`,
+`index.json`, `events.log`, `responses/<task_id>.json`, and
+`projects/<project>/{dev_env.json,decision/,finding/,task/,plan/,builder/,planner/,reviewer/,patrol/,_index/}`.
 
 ## 工具速查
 
-```bash
-python3 memory_write.py --kind decision --project install --title "..." --author memory
-python3 query_memory.py --project install --kind decision [--since 2026-04-01]
-python3 query_memory.py --key credentials.keys.MINIMAX_API_KEY.value
-python3 scan_environment.py --output ~/.agents/memory/                 # 默认写 machine/ 5 文件
-python3 scan_project.py --project clawseat --repo ~/.clawseat --depth shallow --commit
-python3 memory_deliver.py --profile <profile> --task-id <id> --target <seat> --response-inline '{...}'
-
-# Typed-link graph (P1: deterministic regex extraction, no LLM, no embedding)
-python3 extract_links.py --file <path>                                  # auto-runs on memory_write
-python3 query_memory.py --backlinks "entity:taskid:ARENA-228"           # who linked here
-python3 query_memory.py --graph projects/arena/decision/foo --depth 2   # BFS reachable nodes
-```
+- `memory_write.py --kind decision --project install --title "..." --author memory`
+- `query_memory.py --project install --kind decision [--since 2026-04-01]`
+- `query_memory.py --key credentials.keys.MINIMAX_API_KEY.value`
+- `scan_environment.py --output ~/.agents/memory/` writes the default `machine/` 5 files.
+- `scan_project.py --project clawseat --repo ~/.clawseat --depth shallow --commit`
+- `memory_deliver.py --profile <profile> --task-id <id> --target <seat> --response-inline '{...}'`
+- `extract_links.py --file <path>` auto-runs on write; use `query_memory.py --backlinks ...` or `--graph ...`.
 
 ## Typed-link graph (v0.9, P1)
 
@@ -290,13 +353,7 @@ extraction over markdown content. See
 [`core/references/memory-link-graph.md`](../../references/memory-link-graph.md)
 for full schema + edge types.
 
-Indexes:
-
-```text
-~/.agents/memory/_links/<flat-source>.jsonl       # outgoing edges from a page
-~/.agents/memory/_backlinks/<flat-target>.jsonl   # incoming refs to a page or entity
-```
-
+Indexes live at `_links/<flat-source>.jsonl` and `_backlinks/<flat-target>.jsonl`.
 Slug encoding: paths separated by `__`, namespace separator `:` becomes `++`.
 External entities use `entity:<namespace>:<value>` form; supported namespaces
 are `taskid` (e.g. `ARENA-228`), `commit`, `component`, `file`, `url`, `key`,
@@ -332,14 +389,9 @@ Memory seat 的 Claude Code Stop-hook 是：
 
 ## Feishu requireMention 双层配置
 
-Layer 1 是 `openclaw.json` 里的 `requireMention: true`。这是 install
-B5.4.x 自动写入的项目配置，用来要求 Koder 只响应明确 @ 的群消息。
-
-Layer 2 是飞书后台 UI 手工开关：进入飞书后台的群机器人设置，启用
-"需要@机器人才能回复"。这一步编程不可达，operator 必须手工确认。
-
-验证方式：配置后在绑定群 @ Koder 发一条普通消息；Koder 应收到 webhook，
-可查 `~/.openclaw/logs/` 中对应项目日志。
+Layer 1: `openclaw.json` has `requireMention: true` (install B5.4.x writes it).
+Layer 2: operator manually enables Feishu bot "需要@机器人才能回复" in the admin UI.
+Verify by @ Koder in the bound group and checking the matching `~/.openclaw/logs/` project log.
 
 ## 两类任务
 
@@ -430,18 +482,10 @@ Scan a project repo into `projects/<name>/` structured facts.
 python3 scan_project.py --project <name> --repo <path> --depth {shallow|medium|deep}
 ```
 
-Depth: `shallow` = `dev_env.json` only; `medium` = +`runtime/tests/deploy/ci/lint/structure`;
-`deep` = +`env_templates`。  
-Default 是 **dry-run**（stdout JSON）。加 `--commit` 才写盘；`--force-commit`
-允许覆盖。  
-D20: scanner is subprocess-free — pure static filesystem reads (no npm/pip/docker).
-
-Query after commit:
-
-```bash
-python3 query_memory.py --project clawseat --kind runtime
-python3 scan_project.py --project clawseat --repo ~/.clawseat --depth shallow --commit
-```
+Depth: `shallow` = `dev_env.json`; `medium` adds runtime/tests/deploy/ci/lint/structure;
+`deep` adds `env_templates`. Default is dry-run JSON; `--commit` writes, `--force-commit`
+overwrites. D20: scanner is subprocess-free static reads only. Query with
+`query_memory.py --project clawseat --kind runtime` after committing.
 
 M1 scanners (`scan_environment.py`) → machine layer；M2 (`scan_project.py`) → project layer。
 
@@ -450,14 +494,11 @@ Seats reach memory via the query protocol defined in
 (not optional) in the install flow; see [../../../docs/INSTALL.md]'s
 seat-infrastructure and ancestor-handoff steps.
 
-## Borrowed Practices
+## ClawSeat Planning / Verification Practices
 
-- **Brainstorming** — see [`core/references/superpowers-borrowed/brainstorming.md`]
-  设计阶段苏格拉底式提问；不直接给方案，先把需求拆出来再展示给用户。
-- **Writing plans** — see [`core/references/superpowers-borrowed/writing-plans.md`]
-  起草 dispatch brief 时遵循颗粒度规则：每个验收项都能 5 分钟内验证。
-- **Verification before completion** — see [`core/references/superpowers-borrowed/verification-before-completion.md`]
-  作为 verifier 时证据优先于推断；模糊验收一律打回 builder。
+- Intake: use `clawseat-intake` / `multi-team-intake` when user intent or project topology is unclear.
+- Planning handoff: planner owns `workflow.md`; memory owns durable project memory, accepted briefs, and team ownership summaries.
+- Verification: require concrete command/test/doc evidence before claiming completion; no borrowed external practice layer is required.
 
 ## Operator Language Matching(强制)
 

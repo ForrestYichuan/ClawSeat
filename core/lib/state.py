@@ -28,10 +28,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-try:
-    import tomllib
-except ModuleNotFoundError:  # pragma: no cover — Python < 3.11
-    import tomli as tomllib  # type: ignore[no-redef]
+import sys as _sys, pathlib as _pl
+_fc_scripts = str(_pl.Path(__file__).resolve().parent.parent / "scripts")
+if _fc_scripts not in _sys.path: _sys.path.insert(0, _fc_scripts)
+from _toml_compat import loads_safe as _toml_loads, load_safe as _toml_load
 
 try:
     from real_home import real_user_home
@@ -535,7 +535,7 @@ def seed_from_filesystem(
     for binding_path in sorted((agents_root / "tasks").glob("*/PROJECT_BINDING.toml")):
         project_name = binding_path.parent.name
         try:
-            data = tomllib.loads(binding_path.read_text(encoding="utf-8"))
+            data = _toml_loads(binding_path.read_text(encoding="utf-8"))
         except Exception as exc:  # noqa: BLE001
             warnings.warn(f"state.seed: skipping malformed binding {binding_path}: {exc}")
             continue
@@ -546,7 +546,7 @@ def seed_from_filesystem(
         profile_path = agents_root / "profiles" / f"{project_name}-profile-dynamic.toml"
         if profile_path.exists():
             try:
-                profile = tomllib.loads(profile_path.read_text(encoding="utf-8"))
+                profile = _toml_loads(profile_path.read_text(encoding="utf-8"))
                 heartbeat_owner = str(profile.get("heartbeat_owner", ""))
                 active_loop_owner = str(profile.get("active_loop_owner", heartbeat_owner))
                 raw_roles = profile.get("seat_roles", {})
@@ -576,7 +576,7 @@ def seed_from_filesystem(
         if session_path.name != "session.toml":
             continue
         try:
-            data = tomllib.loads(session_path.read_text(encoding="utf-8"))
+            data = _toml_loads(session_path.read_text(encoding="utf-8"))
         except Exception as exc:  # noqa: BLE001
             warnings.warn(f"state.seed: skipping malformed session {session_path}: {exc}")
             continue

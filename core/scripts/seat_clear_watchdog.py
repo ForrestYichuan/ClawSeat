@@ -16,6 +16,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+CORE_ROOT = Path(__file__).resolve().parents[1]
+REPO_ROOT = CORE_ROOT.parent
+CORE_LIB = CORE_ROOT / "lib"
+if str(CORE_LIB) not in sys.path:
+    sys.path.insert(0, str(CORE_LIB))
+
+from profile_loader_v3 import ProfileV3Error, load_profile_v3  # noqa: E402
+
 
 CLEAR_MARKER_RE = re.compile(r"\[(CLEAR)-REQUESTED\]")
 COMPACT_MARKER_RE = re.compile(r"\[(COMPACT)-REQUESTED\]")
@@ -46,6 +54,14 @@ def _runtime_root() -> Path:
     return Path(os.environ.get("CLAWSEAT_RUNTIME_ROOT") or (_home() / ".agent-runtime")).expanduser()
 
 
+def _agents_root() -> Path:
+    return _home() / ".agents"
+
+
+def _profile_path(project: str) -> Path:
+    return _agents_root() / "profiles" / f"{project}-profile-dynamic.toml"
+
+
 def _project_names() -> list[str]:
     root = _home() / ".agents" / "projects"
     if not root.exists():
@@ -60,6 +76,20 @@ def _session_project(session: str, projects: list[str]) -> str | None:
     if "-" in session:
         return session.split("-", 1)[0]
     return None
+
+
+def _session_matches_seat(session: str, project: str, seat: str) -> bool:
+    prefix = f"{project}-{seat}"
+    return session == prefix or session.startswith(f"{prefix}-")
+
+
+def _planner_seats(project: str) -> list[str]:
+    try:
+        profile = load_profile_v3(_profile_path(project))
+    except ProfileV3Error:
+        return []
+    planner_roles = {"planner", "planner-dispatcher"}
+    return [seat for seat in profile.seats if profile.seat_roles.get(seat) in planner_roles]
 
 
 def _list_live_sessions(tmux_bin: str = "tmux") -> list[str]:
@@ -354,6 +384,83 @@ def _scan_session(
     return status, ", ".join(commands) if commands else None
 
 
+def _planner_auto_compact_script() -> Path:
+    return REPO_ROOT / "core" / "skills" / "planner" / "scripts" / "planner_auto_compact.py"
+
+
+def _run_planner_auto_compact(
+    *,
+    project: str,
+    seat: str,
+    dry_run: bool,
+) -> tuple[str, str]:
+    helper = _planner_auto_compact_script()
+    if not helper.exists():
+        return "skip", f"helper_missing:{helper}"
+    env = dict(os.environ)
+    env.setdefault("CLAWSEAT_REAL_HOME", str(_home()))
+    env["PLANNER_AUTO_COMPACT_PROJECT"] = project
+    env["PLANNER_AUTO_COMPACT_SEAT"] = seat
+    env["PLANNER_AUTO_COMPACT_WORKSPACE"] = str(_agents_root() / "workspaces" / project / seat)
+    if dry_run:
+        env["PLANNER_AUTO_COMPACT_DRY_RUN"] = "1"
+    try:
+        result = subprocess.run(
+            [sys.executable, str(helper)],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=45,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return "failed", str(exc)
+
+    output = " ".join((result.stdout or result.stderr or "").split())
+    if result.returncode != 0:
+        return "failed", output or f"exit {result.returncode}"
+    if output.startswith("COMPACT_SENT") or output.startswith("COMPACT_DRY_RUN"):
+        return "sent", output
+    return "skip", output
+
+
+def _scan_planner_auto_compact(
+    *,
+    project: str | None,
+    sessions: list[str],
+    projects: list[str],
+    tmux_bin: str,
+    lines: int,
+    dry_run: bool,
+) -> dict[str, int]:
+    stats = {"planner_compact_sent": 0, "planner_compact_skip": 0, "planner_compact_failed": 0}
+    target_projects = [project] if project else projects
+    for project_name in target_projects:
+        if not project_name:
+            continue
+        for seat in _planner_seats(project_name):
+            session = next((s for s in sessions if _session_matches_seat(s, project_name, seat)), "")
+            if not session:
+                stats["planner_compact_skip"] += 1
+                continue
+            pane_text = _capture_pane(session, tmux_bin=tmux_bin, lines=lines)
+            if THINKING_RE.search(pane_text):
+                stats["planner_compact_skip"] += 1
+                continue
+            status, detail = _run_planner_auto_compact(
+                project=project_name,
+                seat=seat,
+                dry_run=dry_run,
+            )
+            if status == "sent":
+                stats["planner_compact_sent"] += 1
+            elif status == "failed":
+                stats["planner_compact_failed"] += 1
+                print(f"planner_auto_compact failed: project={project_name} seat={seat} detail={detail}", file=sys.stderr)
+            else:
+                stats["planner_compact_skip"] += 1
+    return stats
+
+
 def scan_once(
     *,
     project: str | None = None,
@@ -361,10 +468,24 @@ def scan_once(
     lines: int = 120,
     runtime_root: Path | None = None,
     dry_run: bool = False,
+    planner_auto_compact: bool = True,
 ) -> dict[str, int]:
-    stats = {"sessions": 0, "sent": 0, "seen": 0, "thinking": 0, "none": 0, "empty": 0}
+    stats = {
+        "sessions": 0,
+        "sent": 0,
+        "seen": 0,
+        "thinking": 0,
+        "none": 0,
+        "empty": 0,
+        "planner_compact_sent": 0,
+        "planner_compact_skip": 0,
+        "planner_compact_failed": 0,
+    }
     projects = _project_names()
-    for session in _list_live_sessions(tmux_bin):
+    if project and project not in projects:
+        projects = [project, *projects]
+    sessions = _list_live_sessions(tmux_bin)
+    for session in sessions:
         if project:
             if _session_project(session, projects) != project:
                 continue
@@ -381,6 +502,17 @@ def scan_once(
             dry_run=dry_run,
         )
         stats[status] = stats.get(status, 0) + 1
+    if planner_auto_compact and os.environ.get("CLAWSEAT_PLANNER_AUTO_COMPACT_ENABLED", "1") == "1":
+        compact_stats = _scan_planner_auto_compact(
+            project=project,
+            sessions=sessions,
+            projects=projects,
+            tmux_bin=tmux_bin,
+            lines=lines,
+            dry_run=dry_run,
+        )
+        for key, value in compact_stats.items():
+            stats[key] = stats.get(key, 0) + value
     return stats
 
 
@@ -392,6 +524,7 @@ def run_loop(
     lines: int = 120,
     runtime_root: Path | None = None,
     dry_run: bool = False,
+    planner_auto_compact: bool = True,
 ) -> int:
     while True:
         stats = scan_once(
@@ -400,6 +533,7 @@ def run_loop(
             lines=lines,
             runtime_root=runtime_root,
             dry_run=dry_run,
+            planner_auto_compact=planner_auto_compact,
         )
         print(" ".join(f"{key}={value}" for key, value in stats.items()))
         time.sleep(interval)
@@ -414,6 +548,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tmux-bin", default="tmux", help="tmux executable path.")
     parser.add_argument("--runtime-root", help="Override ~/.agent-runtime for tests.")
     parser.add_argument("--dry-run", action="store_true", help="Print actions without tmux send-keys.")
+    parser.add_argument(
+        "--no-planner-auto-compact",
+        action="store_true",
+        help="Disable queue-drained planner auto-compact scan.",
+    )
     return parser
 
 
@@ -428,6 +567,7 @@ def main(argv: list[str] | None = None) -> int:
             lines=args.lines,
             runtime_root=runtime_root,
             dry_run=args.dry_run,
+            planner_auto_compact=not args.no_planner_auto_compact,
         )
     stats = scan_once(
         project=args.project,
@@ -435,6 +575,7 @@ def main(argv: list[str] | None = None) -> int:
         lines=args.lines,
         runtime_root=runtime_root,
         dry_run=args.dry_run,
+        planner_auto_compact=not args.no_planner_auto_compact,
     )
     print(" ".join(f"{key}={value}" for key, value in stats.items()))
     return 0

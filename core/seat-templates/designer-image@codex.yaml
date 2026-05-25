@@ -1,0 +1,32 @@
+---
+template_name: designer-image@codex
+role: designer-image
+tool: codex
+provider: openai
+auth_mode: api
+cost_class: medium
+default_skills:
+  - designer-image
+  - image-gen
+  - asset-pipeline
+boot_command: "codex --workspace {workspace}"
+session_kind: tmux
+capabilities:
+  - image-generation
+  - asset-iteration
+  - in-browser-preview
+acceptance_route: operator
+boundary: "outputs visual assets; outputs route to operator audit (NOT reviewer, NOT same-source Codex)"
+---
+
+# Designer-image seat (Codex)
+
+Visual asset producer. Uses Codex gpt-image-1.5 + in-app browser to
+iterate on card art / icons / mockup polish in a single agent loop.
+
+Per §4.7.4: image outputs ALWAYS route `acceptance_route: operator`.
+Codex must not audit its own image outputs (§6.4 same-source ban).
+
+STS workflow:
+- Content team: card art (150 incl. upgrade) + relics + enemies + events
+- Shell team: UI icons / buffs / HUD decorations / menu backgrounds

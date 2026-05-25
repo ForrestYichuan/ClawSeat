@@ -160,6 +160,7 @@ class TestScanNetwork:
 class TestScanGithub:
     def test_happy_path_returns_schema(self, tmp_path, monkeypatch):
         monkeypatch.setattr(se, "HOME", tmp_path)
+        monkeypatch.setattr(se, "run_cmd", lambda *args, **kwargs: "")
         result = se.scan_github()
         assert "gitconfig" in result
         assert "gh_cli" in result

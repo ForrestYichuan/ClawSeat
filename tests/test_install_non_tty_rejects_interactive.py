@@ -23,7 +23,10 @@ def test_non_tty_provider_selection_fails_with_clear_error(tmp_path: Path) -> No
         "ANTHROPIC_AUTH_TOKEN": "",
         "ANTHROPIC_BASE_URL": "",
         "CLAUDE_CODE_OAUTH_TOKEN": "",
-        "MINIMAX_API_KEY": "",
+            # Satisfy template worker-key preflight so this test reaches the
+            # primary memory provider-selection gate.
+            "DEEPSEEK_API_KEY": "sk-test-deepseek",
+            "MINIMAX_API_KEY": "sk-test-minimax",
         "DASHSCOPE_API_KEY": "",
         "ARK_API_KEY": "",
     }
@@ -35,7 +38,7 @@ def test_non_tty_provider_selection_fails_with_clear_error(tmp_path: Path) -> No
                 "--project",
                 "test-nontty",
                 "--template",
-                "clawseat-solo",
+                "clawseat-engineering",
                 "--force-repo-root",
                 str(REPO),
             ],

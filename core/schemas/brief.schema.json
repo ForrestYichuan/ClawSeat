@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "clawseat://schemas/brief.schema.json",
+  "title": "ClawSeat brief (v3 §4.2)",
+  "description": "Memory-queued task brief that planner pulls from tasks.queue.jsonl and converts to workflow.md. Product intent may be authored by operator/warden and preserved by memory.",
+  "type": "object",
+  "required": [
+    "task_id",
+    "project",
+    "team",
+    "objective",
+    "acceptance_criteria",
+    "seats_required"
+  ],
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$"
+    },
+    "project": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "team": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$"
+    },
+    "created": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "created_by": {
+      "type": "string",
+      "description": "Author seat (typically 'memory')"
+    },
+    "objective": {
+      "type": "string",
+      "minLength": 5
+    },
+    "out_of_scope": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "constraints": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "seats_required": {
+      "type": "array",
+      "items": {"type": "string"},
+      "minItems": 1
+    },
+    "depends_on": {
+      "type": "array",
+      "description": "Upstream task_id list. Planner blocks claim until all upstream task_done.",
+      "items": {"type": "string"},
+      "default": []
+    },
+    "sub_tasks": {
+      "type": "array",
+      "description": "Inline sub-task list for batch scenarios (e.g. 75 cards). Planner expands to parallel subagents.",
+      "items": {
+        "type": "object",
+        "required": ["id", "title"],
+        "properties": {
+          "id": {"type": "string"},
+          "title": {"type": "string"}
+        }
+      }
+    },
+    "acceptance_criteria": {
+      "type": "object",
+      "anyOf": [
+        {
+          "required": ["mechanical"],
+          "properties": {"mechanical": {"minItems": 1}}
+        },
+        {
+          "required": ["reviewer"],
+          "properties": {"reviewer": {"minItems": 1}}
+        },
+        {
+          "required": ["operator"],
+          "properties": {"operator": {"minItems": 1}}
+        }
+      ],
+      "properties": {
+        "mechanical": {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {"type": "string"},
+              {
+                "type": "object",
+                "properties": {
+                  "criterion": {"type": "string"},
+                  "command": {"type": "string"},
+                  "route": {"$ref": "#/$defs/acceptance_route_enum"},
+                  "description": {"type": "string"},
+                  "diagnostic": {
+                    "type": "boolean",
+                    "description": "When true, non-zero exit is recorded as diagnostic evidence and does not fail aggregate acceptance. Use for full-suite baseline probes where unrelated pre-existing failures should not block. Relevant failures must remain non-diagnostic (omit this field or set false)."
+                  }
+                },
+                "anyOf": [
+                  {"required": ["command"]},
+                  {"required": ["criterion"]}
+                ]
+              }
+            ]
+          },
+          "description": "Optional mechanical commands the acceptance executor physically runs. Each item must be a machine-deterministic shell command. Pure review/operator tasks may omit mechanical or leave it empty. For non-blocking baseline evidence (full-suite probes where pre-existing failures exist), use diagnostic:true in the criterion dict or --baseline-criteria N at acceptance-run time. Human natural-language qualifiers are not enforceable and must not appear in hard mechanical commands."
+        },
+        "reviewer": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Reviewer-routed acceptance items (code logic / balance / data consistency)."
+        },
+        "operator": {
+          "type": "array",
+          "items": {"type": "string"},
+          "description": "Operator-routed acceptance items (image assets / subjective / game feel)."
+        }
+      }
+    },
+    "fuzz_required": {
+      "type": "boolean",
+      "default": false,
+      "description": "Forced true for nested DSL / data x data combos / random generation."
+    },
+    "fuzz_spec": {
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "anyOf": [
+              {"type": "string"},
+              {"type": "object"}
+            ]
+          }
+        },
+        {"type": "object"}
+      ]
+    },
+    "priority": {
+      "type": "string",
+      "enum": ["P0", "P1", "P2", "P3"]
+    },
+    "deadline": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "artifacts_expected": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "notify_on_completion": {
+      "type": "array",
+      "items": {"type": "string"},
+      "default": ["memory"]
+    },
+    "parent_task_id": {
+      "type": ["string", "null"],
+      "description": "For retries after task_failed; references original task."
+    }
+  },
+  "$defs": {
+    "acceptance_route_enum": {
+      "type": "string",
+      "enum": ["mechanical", "reviewer", "operator"]
+    }
+  }
+}

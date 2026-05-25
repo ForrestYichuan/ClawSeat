@@ -281,6 +281,12 @@ The `koder` overlay (§4) is the inbound channel: operator messages on Feishu �
 
 ## 1. Prerequisites
 
+Window mode contract:
+
+- Standalone ClawSeat uses native iTerm workers/memories windows by default, so macOS + iTerm2 + the `iterm2` Python module are required for that visual mode.
+- Cartooner-integrated or embedded-terminal ClawSeat should pass `--no-window`; the install still launches canonical tmux seats, but skips native iTerm windows and their bootstrap hard checks.
+- `--mode multi` is the v3 multi-team/profile-render path. It renders approved team proposals and workspace skeletons, and does not open iTerm windows.
+
 ```bash
 git clone <repo-url> "$HOME/ClawSeat"
 cd "$HOME/ClawSeat"
@@ -351,6 +357,15 @@ bash scripts/install.sh --load-all-skills
 # Disable Feishu notifications (no lark-cli required)
 CLAWSEAT_FEISHU_ENABLED=0 bash scripts/install.sh --project myproj
 
+# Cartooner / embedded-terminal mode: tmux seats, no native iTerm windows
+bash scripts/install.sh --project myproj --template clawseat-creative --provider minimax --no-window
+
+# v3 multi-team dry-run after memory has written approved team proposals
+bash scripts/install.sh --mode multi --project myproj --teams core,content --dry-run
+
+# Minimal v3 project group: legacy solo alias seeds MULTI_TEAM_MINIMAL proposals
+bash scripts/install.sh --project myproj --template clawseat-solo --dry-run
+
 # Forget remembered per-seat harness choices from a previous run
 bash scripts/install.sh --reset-harness-memory
 ```
@@ -362,7 +377,7 @@ bash scripts/install.sh --reset-harness-memory
 | `--project <name>` | Install or reinstall a named ClawSeat project. Defaults to `install`. |
 | `--repo-root <path>` | Set the target project repository used as seat cwd. |
 | `--force-repo-root <path>` | Override the ClawSeat install code root when auto-detecting multiple worktrees is wrong. |
-| `--template <clawseat-engineering\|clawseat-creative\|clawseat-solo>` | Select the roster template. clawseat-engineering has 5 seats; clawseat-creative has 5 seats; clawseat-solo has 3. |
+| `--template <clawseat-engineering\|clawseat-creative\|clawseat-solo>` | Select the install template. `clawseat-solo` is now a legacy alias for v3 `MULTI_TEAM_MINIMAL`, not a separate single-mode roster. |
 | `--memory-tool <claude\|codex\|gemini>` | Override the primary memory seat tool. Non-Claude tools skip Claude provider selection. |
 | `--memory-model <model>` | Set the memory model when the selected memory tool supports an explicit model. |
 | `--provider <mode\|n>` | Select the memory-seat provider by detected candidate number or mode. |
@@ -375,6 +390,7 @@ bash scripts/install.sh --reset-harness-memory
 | `--load-all-skills` | Install all bundled ClawSeat skills for non-Claude tools too. Claude always receives the full set. |
 | `--dry-run` | Print planned actions without mutating host state where supported. |
 | `--detect-only` | Print one `detect_all` JSON environment summary and exit before install side effects. |
+| `--no-window` | Skip native iTerm workers/memories windows and bootstrap iTerm hard checks. Tmux seats still launch and can be attached from embedded terminals. |
 | `--reset-harness-memory` | Delete remembered per-seat harness choices and exit. |
 | `--help` / `-h` | Print the parser-owned usage line. |
 
@@ -382,7 +398,7 @@ Available templates:
 
 - `clawseat-engineering`: 5-seat engineering template (memory + planner + builder + reviewer + patrol), where reviewer now merges QA + visual review. Bound to gstack skills.
 - `clawseat-creative`: 5-seat cartooner-bound creative team (memory + writer + builder-image + builder-av + patrol). Vision Steward + Story Specialist + Image Specialist + AV Cinematographer (Gemini for YouTube reference learning) + Asset Guardian; all seats use cartooner skills via cartooner-harness protocol layer.
-- `clawseat-solo`: 3-seat collaboration template (memory + builder + planner-gemini), all OAuth, standard brief -> workflow -> dispatch -> verdict cycle.
+- `clawseat-solo`: legacy alias for v3 `MULTI_TEAM_MINIMAL`; seeds one or more `planner+builder` subteams plus `quality-docs` under one project memory.
 
 ### Provider Selection — CLI Flag Mapping
 
@@ -535,7 +551,7 @@ Memory executes Phase-A in order:
 | B2-verify-memory | `tmux has-session -t <project>-memory`; relaunch once if dead. | Memory seat alive. |
 | B2.5-bootstrap-tenants | `python3 core/scripts/bootstrap_machine_tenants.py ~/.agents/memory/` — populates `~/.clawseat/machine.toml [openclaw_tenants.*]` from `machine/openclaw.json.agents`. | `list_openclaw_tenants()` returns non-empty (if OpenClaw installed). |
 | B3-verify-openclaw-binding | Read `~/.openclaw/workspace.toml` if present. | Project field matches or step is skipped with warning. |
-| B3.5-launch-engineers | **Interactive, one-by-one**. For each worker from the selected template (`clawseat-engineering` uses `planner`, `builder`, `reviewer`, `patrol`; `clawseat-creative` uses `writer`, `builder-image`, `builder-av`, `patrol`; `clawseat-solo` uses `builder`, `planner`): ask operator for provider (default: claude-code + MiniMax), optionally `session switch-harness`, then `session start-engineer`, wait ≤15s for `tmux has-session`, and confirm the waiting pane auto-attached before moving on. | Each `install-<seat>` is alive and attached. |
+| B3.5-launch-engineers | **Interactive, one-by-one**. For each worker from the selected v2 template (`clawseat-engineering` uses `planner`, `builder`, `reviewer`, `patrol`; `clawseat-creative` uses `writer`, `builder-image`, `builder-av`, `patrol`) ask operator for provider, optionally `session switch-harness`, then `session start-engineer`. `clawseat-solo` does not use this path anymore; it delegates to v3 multi-team minimal. | Each `install-<seat>` is alive and attached, or v3 profile skeleton rendered for the solo alias. |
 | B5-verify-feishu-binding | Read project binding metadata from `~/.agents/projects/install/project.toml` / `project-local.toml`. | `feishu_group_id` present *or* operator explicitly skips (CLI-only mode). |
 | B6-smoke | If `feishu_group_id` set, memory triggers planner to do one broadcast turn → `lark-cli` broadcasts a structured summary to the group. If skipped, memory runs CLI-only smoke (writes a test file, verifies via grep). | Smoke result recorded in `STATUS.md`. |
 | B7-write-status-ready | Write `~/.agents/tasks/install/STATUS.md`. | `phase=ready`, `providers=<memory + workers>`. |
@@ -794,8 +810,8 @@ Full install-script error-code inventory from `scripts/install.sh` and
 
 | Source | Codes |
 |--------|-------|
-| `install.sh` | `COMMAND_FAILED`, `INVALID_FLAGS`, `INVALID_MEMORY_MODEL`, `INVALID_MEMORY_TOOL`, `INVALID_PROJECT` |
-| | `INVALID_REPO_ROOT`, `INVALID_TEMPLATE`, `UNKNOWN_FLAG` |
+| `install.sh` | `COMMAND_FAILED`, `INVALID_FLAGS`, `INVALID_MEMORY_MODEL`, `INVALID_MEMORY_TOOL`, `INVALID_MODE`, `INVALID_PROJECT` |
+| | `INVALID_REPO_ROOT`, `INVALID_TEMPLATE`, `MISSING_SCRIPT`, `UNKNOWN_FLAG` |
 | `lib/preflight.sh` | `ENV_SCAN_INCOMPLETE`, `INVALID_PYTHON_BIN`, `MISSING_PYTHON311`, `PREFLIGHT_FAILED` |
 | `lib/project.sh` | `AGENT_ADMIN_MISSING`, `BRIEF_CHMOD_FAILED`, `GUIDE_CHMOD_FAILED`, `GUIDE_DIR_FAILED`, `INVALID_PROJECT` |
 | | `KICKOFF_CHMOD_FAILED`, `KICKOFF_DIR_FAILED`, `KICKOFF_WRITE_FAILED`, `PROJECTS_JSON_ACTION_UNKNOWN`, `PROJECTS_REGISTRY_MISSING` |

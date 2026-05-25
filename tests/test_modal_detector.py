@@ -326,11 +326,27 @@ def test_live_tmux_modal_detected(tmp_db, tmp_path):
     session = "test-c105-modal-001"
     modal_content = "Do you want to proceed?\n 1. Yes\n 2. Yes, and allow hooks/\n 3. No\n"
     try:
-        subprocess.run(
+        start = subprocess.run(
             ["tmux", "new-session", "-d", "-s", session, "-x", "120", "-y", "40"],
-            check=True,
+            capture_output=True,
+            text=True,
+            check=False,
             env={**os.environ, "TMUX": ""},
         )
+        if start.returncode != 0:
+            stderr = start.stderr.lower()
+            if (
+                "fork failed" in stderr
+                or "out of pty" in stderr
+                or "device not configured" in stderr
+            ):
+                pytest.skip(f"tmux cannot allocate a new PTY: {start.stderr.strip()}")
+            raise subprocess.CalledProcessError(
+                start.returncode,
+                ["tmux", "new-session", "-d", "-s", session, "-x", "120", "-y", "40"],
+                output=start.stdout,
+                stderr=start.stderr,
+            )
         subprocess.run(
             ["tmux", "send-keys", "-t", session, modal_content, ""],
             check=True,

@@ -238,6 +238,7 @@ def test_start_engineer_passes_custom_env_file_and_launcher_removes_it(
     fake_home = tmp_path / "home"
     fake_home.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(aas.Path, "home", classmethod(lambda cls: fake_home))
+    monkeypatch.setattr(aas, "real_user_home", lambda: fake_home)
 
     session = _make_session(
         tmp_path,
@@ -277,6 +278,7 @@ def test_start_engineer_codex_xcode_best_uses_xcode_auth_without_custom_env(
     fake_home = tmp_path / "home"
     fake_home.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(aas.Path, "home", classmethod(lambda cls: fake_home))
+    monkeypatch.setattr(aas, "real_user_home", lambda: fake_home)
 
     session = _make_session(
         tmp_path,
@@ -315,6 +317,7 @@ def test_start_engineer_reset_kills_session_before_launcher(
     fake_home = tmp_path / "home"
     fake_home.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(aas.Path, "home", classmethod(lambda cls: fake_home))
+    monkeypatch.setattr(aas, "real_user_home", lambda: fake_home)
 
     session = _make_session(
         tmp_path,

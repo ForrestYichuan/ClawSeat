@@ -435,7 +435,7 @@ class SessionStartLifecycle:
             custom_env_file = ""
             try:
                 self._sync_launcher_secret_file(session, launcher_auth)
-                if launcher_auth == "custom":
+                if launcher_auth in ("custom", "minimax", "deepseek", "xcode"):
                     custom_env_file = self._write_launcher_custom_env_file(session)
                 cmd = [
                     "bash",
@@ -531,8 +531,13 @@ class SessionStartLifecycle:
                     f"window_state={detail}; reason={exc}"
                 ) from exc
             finally:
-                if custom_env_file and os.path.exists(custom_env_file):
-                    os.unlink(custom_env_file)
+                # custom_env_file is consumed and unlinked by load_custom_env()
+                # inside the tmux session.  Deleting it here races the in-tmux
+                # reader (especially for non-"custom" launcher auth modes where
+                # ensure_custom_env_file_for_auth skips the file).  Let the
+                # in-tmux load_custom_env own cleanup; leftover files in /tmp
+                # are harmless and cleaned by the OS.
+                pass
         # Enable tmux terminal titles and status line so iTerm tabs show
         # the canonical session name and attachment state.
         self._configure_session_display(session.session)

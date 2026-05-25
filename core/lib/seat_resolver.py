@@ -44,6 +44,11 @@ if _THIS_DIR not in sys.path:
     sys.path.insert(0, _THIS_DIR)
 from real_home import real_user_home  # noqa: E402
 
+_SCRIPTS_DIR = str(Path(__file__).resolve().parents[1] / "scripts")
+if _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
+from _toml_compat import loads_safe as _toml_loads_safe  # noqa: E402
+
 
 def _home() -> Path:
     return real_user_home()
@@ -59,9 +64,7 @@ def _openclaw_home_resolved() -> Path:
 
 def _load_toml(path: Path) -> Optional[dict]:
     try:
-        import tomllib
-
-        return tomllib.loads(path.read_text(encoding="utf-8"))
+        return _toml_loads_safe(path.read_text(encoding="utf-8"))
     except Exception:
         return None
 

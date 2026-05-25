@@ -299,6 +299,34 @@ def test_dry_run_defaults_dir_and_session_from_cwd(tmp_path: Path):
     assert "session:  claude-oauth_token-agent-launcher-workspace" in result.stdout
 
 
+def test_exec_agent_shell_command_clears_stale_tmux_server_seat_env(tmp_path: Path):
+    """The tmux pane command must not inherit stale CLAWSEAT_* from tmux server env."""
+    script = f"""
+set -euo pipefail
+export REAL_HOME={str(tmp_path)!r}
+export CLAWSEAT_PROJECT=arena
+export CLAWSEAT_PROVIDER=openai
+export CLAWSEAT_SEAT=core-builder-core
+export CLAWSEAT_ENGINEER_ID=core-builder-core
+export CLAWSEAT_ENGINEER_PROFILE={str(tmp_path / "engineer.toml")!r}
+export CLAWSEAT_AGENT_LAUNCHER_LIBRARY_ONLY=1
+source {str(_LAUNCHERS / "agent-launcher.sh")!r}
+TOOL_NAME=codex
+AUTH_MODE=chatgpt
+SESSION_NAME=arena-core-builder-core-codex
+WORKDIR={str(tmp_path)!r}
+exec_agent_shell_command
+"""
+    result = _run(["bash", "-lc", script])
+    assert result.returncode == 0, result.stderr
+    out = result.stdout
+    assert "-u CLAWSEAT_SEAT" in out
+    assert "-u CLAWSEAT_PROJECT" in out
+    assert "CLAWSEAT_SEAT=core-builder-core" in out
+    assert "CLAWSEAT_PROJECT=arena" in out
+    assert "REAL_HOME=" in out
+
+
 # ─────────────────────────────────────────────────────────────────────
 # Launcher directory self-relative resolution
 # ─────────────────────────────────────────────────────────────────────
