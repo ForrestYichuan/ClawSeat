@@ -241,7 +241,7 @@ PY
 }
 
 open_iterm_window() {
-  local payload="$1" target_var="$2" err_file out status
+  local payload="$1" target_var="$2" err_file out status timeout_bin
   if [[ "$DRY_RUN" == "1" ]]; then
     printf '[dry-run] %q %q <<JSON\n%s\nJSON\n' "$PYTHON_BIN" "$ITERM_DRIVER" "$payload"
     printf -v "$target_var" '%s' "dry-run-$target_var"; return
@@ -263,9 +263,23 @@ open_iterm_window() {
     die 40 ITERM2_PYTHON_MISSING "missing iterm2 module; install with: pip3 install --user --break-system-packages iterm2"
   fi
   err_file="$(mktemp)"
-  out="$(
-    printf '%s' "$payload" | timeout "${ITERM_DRIVER_TIMEOUT_SECONDS}s" "$PYTHON_BIN" "$ITERM_DRIVER" 2>"$err_file"
-  )" || {
+  if command -v timeout >/dev/null 2>&1; then
+    timeout_bin="timeout"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    timeout_bin="gtimeout"
+  else
+    timeout_bin=""
+    warn "timeout/gtimeout not found; running iTerm pane driver without wall-clock timeout."
+  fi
+  if [[ -n "$timeout_bin" ]]; then
+    out="$(
+      printf '%s' "$payload" | "$timeout_bin" "${ITERM_DRIVER_TIMEOUT_SECONDS}s" "$PYTHON_BIN" "$ITERM_DRIVER" 2>"$err_file"
+    )"
+  else
+    out="$(
+      printf '%s' "$payload" | "$PYTHON_BIN" "$ITERM_DRIVER" 2>"$err_file"
+    )"
+  fi || {
     status=$?
     cat "$err_file" >&2
     rm -f "$err_file"

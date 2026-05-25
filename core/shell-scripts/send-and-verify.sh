@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# send-and-verify.sh — fire-and-forget: send message, wait ENTER_DELAY, then Enter
+# send-and-verify.sh — fire-and-forget: send message, wait ENTER_DELAY, then
+# Enter flush.
 # (mirrors canonical tmux-send timing; honors AGENT_LAUNCHER_TMUX_SEND_ENTER_DELAY,
-# default 1s).
+# default 1s). The fallback raw-tmux path sends Enter three times to cover
+# Codex/Gemini cases where the first Enter is swallowed while the TUI is still
+# accepting pasted text.
 # Usage: ./send-and-verify.sh [--project <project>] [--force] <session> "<message>"
 # Exit codes: 0=sent, 1=param error/SESSION_NOT_FOUND/SESSION_DEAD/TMUX_MISSING,
 #             2=INPUT_REJECTED (control chars or oversized message, audit H3)
@@ -236,10 +239,12 @@ if [ -n "$TMUX_SEND_BIN" ]; then
 else
   # Fallback: raw tmux send-keys with guard-bypass env var. Mirror the
   # canonical tmux-send timing — text first, then ENTER_DELAY (default 1s,
-  # honoring AGENT_LAUNCHER_TMUX_SEND_ENTER_DELAY), then a single Enter.
+  # honoring AGENT_LAUNCHER_TMUX_SEND_ENTER_DELAY), then a 3-Enter flush.
   # Sending Enter too quickly after the text can cause a TUI to receive a
   # partially-rendered message (Enter fires before the alternate-screen
-  # paste handler has consumed all bytes).
+  # paste handler has consumed all bytes). The extra Enter pulses are
+  # intentionally spaced out; they turn a swallowed first Enter into a real
+  # submit while remaining harmless at an idle prompt.
   ENTER_DELAY="${AGENT_LAUNCHER_TMUX_SEND_ENTER_DELAY:-1}"
   case "$ENTER_DELAY" in
     ''|*[!0-9.]*) ENTER_DELAY=1 ;;
@@ -247,7 +252,10 @@ else
   export AGENT_LAUNCHER_TMUX_SEND_ACTIVE=1
   env -u TMUX "$TMUX_BIN" send-keys -l -t "$SESSION" "$MSG"
   sleep "$ENTER_DELAY"
-  env -u TMUX "$TMUX_BIN" send-keys -t "$SESSION" Enter
+  for _enter_flush in 1 2 3; do
+    env -u TMUX "$TMUX_BIN" send-keys -t "$SESSION" Enter
+    sleep 0.2
+  done
 fi
 echo "SENT: $SESSION"
 exit 0

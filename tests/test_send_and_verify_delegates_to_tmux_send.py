@@ -136,6 +136,51 @@ def test_fallback_sets_active_env_when_tmux_send_unavailable(tmp_path: Path) -> 
     )
 
 
+def test_fallback_sends_three_enter_flushes_when_tmux_send_unavailable(tmp_path: Path) -> None:
+    """Raw fallback must send text once, then Enter three times for slow Codex/Gemini TUIs."""
+    bin_dir = tmp_path / "bin"
+    send_log = tmp_path / "send.log"
+
+    _write_exe(
+        bin_dir / "tmux",
+        textwrap.dedent(f"""\
+            #!/bin/bash
+            case "$1" in
+              has-session) exit 0 ;;
+              send-keys)
+                if [ "$2" = "-l" ]; then
+                  printf 'TEXT:%s\\n' "${{@: -1}}" >> '{send_log}'
+                else
+                  printf 'KEY:%s\\n' "${{@: -1}}" >> '{send_log}'
+                fi
+                exit 0
+                ;;
+              *) exit 0 ;;
+            esac
+        """),
+    )
+    _write_exe(bin_dir / "agentctl.sh", "#!/bin/bash\necho 'stub-session'\n")
+
+    env = _base_env(tmp_path)
+    env["AGENTCTL_BIN"] = str(bin_dir / "agentctl.sh")
+    env["TMUX_BIN"] = str(bin_dir / "tmux")
+    env["AGENT_LAUNCHER_BIN"] = str(tmp_path / "no-such-dir")
+    env["AGENT_LAUNCHER_TMUX_SEND_ENTER_DELAY"] = "0"
+
+    result = subprocess.run(
+        ["bash", str(_SEND_AND_VERIFY), "stub-session", "hello"],
+        capture_output=True, text=True, env=env, timeout=10,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert send_log.read_text(encoding="utf-8").splitlines() == [
+        "TEXT:hello",
+        "KEY:Enter",
+        "KEY:Enter",
+        "KEY:Enter",
+    ]
+
+
 # ── Test 3: dispatch_task loud-fail on notify failure ────────────────────────
 
 

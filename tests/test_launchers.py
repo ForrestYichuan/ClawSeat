@@ -206,6 +206,41 @@ def test_dry_run_does_not_double_suffix_explicit_session():
     assert "project-memory-claude-claude" not in result.stdout
 
 
+def test_load_custom_env_preserves_persistent_secret_file(tmp_path: Path):
+    secret = tmp_path / "planner.env"
+    secret.write_text("export LAUNCHER_CUSTOM_API_KEY='fixture-key'\n", encoding="utf-8")
+
+    result = _run([
+        "bash",
+        "-lc",
+        (
+            "CLAWSEAT_AGENT_LAUNCHER_LIBRARY_ONLY=1 "
+            f"source {str(_LAUNCHERS / 'agent-launcher.sh')!r}; "
+            f"load_custom_env {str(secret)!r}; "
+            f"test -f {str(secret)!r}"
+        ),
+    ])
+
+    assert result.returncode == 0, result.stderr
+    assert secret.exists()
+
+
+def test_load_custom_env_removes_launcher_temp_file(tmp_path: Path):
+    result = _run([
+        "bash",
+        "-lc",
+        (
+            "CLAWSEAT_AGENT_LAUNCHER_LIBRARY_ONLY=1 "
+            f"source {str(_LAUNCHERS / 'agent-launcher.sh')!r}; "
+            "tmp=$(write_custom_env_file fixture-key '' ''); "
+            "load_custom_env \"$tmp\"; "
+            "test ! -e \"$tmp\""
+        ),
+    ])
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_dry_run_via_wrapper():
     """The thin wrappers should produce identical dry-run output."""
     direct = _run([

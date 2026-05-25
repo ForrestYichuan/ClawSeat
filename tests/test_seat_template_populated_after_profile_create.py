@@ -106,7 +106,8 @@ def test_project_bootstrap_populates_seat_claude_templates(tmp_path: Path) -> No
 
     planner_settings = json.loads((planner_template / "settings.json").read_text(encoding="utf-8"))
     assert planner_settings["hooks"] == {}
-    assert planner_settings["permissions"] == {}
+    assert planner_settings["permissions"] == {"defaultMode": "bypassPermissions"}
+    assert planner_settings["skipDangerousModePermissionPrompt"] is True
 
 
 def test_memory_template_contains_role_plus_shared_skills_and_stop_hook(tmp_path: Path) -> None:
@@ -121,7 +122,8 @@ def test_memory_template_contains_role_plus_shared_skills_and_stop_hook(tmp_path
     }
 
     settings = json.loads((template_dir / "settings.json").read_text(encoding="utf-8"))
-    assert settings["permissions"] == {}
+    assert settings["permissions"] == {"defaultMode": "bypassPermissions"}
+    assert settings["skipDangerousModePermissionPrompt"] is True
     stop_entries = settings["hooks"]["Stop"]
     assert len(stop_entries) == 1
     hook_def = stop_entries[0]["hooks"][0]

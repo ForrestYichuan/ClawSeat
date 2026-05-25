@@ -64,3 +64,42 @@ def test_seed_user_tool_dirs_links_gemini_and_codex_user_dirs(tmp_path: Path) ->
 
     assert (real_home / ".config" / "gemini" / "roundtrip.txt").read_text(encoding="utf-8") == "g"
     assert (real_home / ".codex" / "roundtrip.txt").read_text(encoding="utf-8") == "c"
+
+
+def test_seed_user_tool_dirs_prepends_clawseat_tool_entry_paths(tmp_path: Path) -> None:
+    real_home = tmp_path / "real_home"
+    runtime_home = tmp_path / "runtime" / "home"
+    tool_entry = real_home / "AI" / "工具入口"
+    npm_global = real_home / "AI" / "toolchains" / "npm-global" / "bin"
+    tool_entry.mkdir(parents=True)
+    npm_global.mkdir(parents=True)
+    runtime_home.mkdir(parents=True)
+
+    env = {
+        **os.environ,
+        "HOME": str(real_home),
+        "PATH": "/usr/bin:/bin",
+        "CLAWSEAT_AGENT_LAUNCHER_LIBRARY_ONLY": "1",
+    }
+    snippet = "\n".join(
+        [
+            "set -euo pipefail",
+            f"source {shlex.quote(str(LAUNCHER))}",
+            f"seed_user_tool_dirs {shlex.quote(str(runtime_home))}",
+            "printf '%s' \"$PATH\"",
+        ]
+    )
+    result = subprocess.run(
+        ["bash", "-c", snippet],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    parts = result.stdout.split(":")
+    assert str(npm_global) in parts
+    assert str(tool_entry) in parts
+    assert parts.index(str(npm_global)) < parts.index("/usr/bin")
+    assert parts.index(str(tool_entry)) < parts.index("/usr/bin")

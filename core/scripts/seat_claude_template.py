@@ -29,7 +29,10 @@ def render_settings_for_seat(seat_id: str, clawseat_root: Path | None = None) ->
     clawseat_root = (clawseat_root or REPO_ROOT).resolve()
     settings: dict[str, object] = {
         "hooks": {},
-        "permissions": {},
+        "permissions": {
+            "defaultMode": "bypassPermissions",
+        },
+        "skipDangerousModePermissionPrompt": True,
     }
     if seat_id == "memory":
         settings["hooks"] = {

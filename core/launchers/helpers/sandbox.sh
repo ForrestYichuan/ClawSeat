@@ -70,6 +70,18 @@ seed_user_tool_dirs() {
     fi
   done
 
+  local tool_dir
+  for tool_dir in \
+    "$REAL_HOME/AI/工具入口" \
+    "$REAL_HOME/AI/toolchains/npm-global/bin" \
+    "/opt/homebrew/bin"; do
+    [[ -d "$tool_dir" ]] || continue
+    case ":${PATH:-}:" in
+      *":$tool_dir:"*) ;;
+      *) export PATH="$tool_dir${PATH:+:$PATH}" ;;
+    esac
+  done
+
   # Seed the lark-cli HOME-override wrapper so sandbox seats can invoke
   # `lark-cli ...` transparently and still see the operator's real
   # Keychain-backed auth state. The wrapper itself lives in

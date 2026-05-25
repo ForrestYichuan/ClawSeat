@@ -144,7 +144,11 @@ load_custom_env() {
   set -a
   source "$env_file"
   set +a
-  rm -f "$env_file"
+  case "$env_file" in
+    /tmp/agent-launcher-custom.*|/var/folders/*/T/agent-launcher-custom.*)
+      rm -f "$env_file"
+      ;;
+  esac
 }
 
 # ============================================================================

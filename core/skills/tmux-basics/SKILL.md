@@ -59,7 +59,8 @@ This script (fire-and-forget transport since commit d7f6e0d):
 1. Resolves the canonical session name via agentctl.sh
 2. Verifies the tmux session is alive (`tmux has-session`)
 3. Sends the text with `tmux send-keys -l`
-4. Waits 0.3s, then sends `Enter` three times at 0.2s intervals to
+4. Waits `AGENT_LAUNCHER_TMUX_SEND_ENTER_DELAY` seconds (default 1s), then
+   sends `Enter` three times at 0.2s intervals to
    flush any stuck prior input and submit the new message
 5. Exits 0 on transport success (session live + send-keys accepted),
    1 on SESSION_DEAD / SESSION_NOT_FOUND / TMUX_MISSING, 2 reserved
@@ -73,7 +74,7 @@ must rely on downstream receipt (e.g., target seat's Consumed ACK).
 
 ```bash
 tmux send-keys -l -t <session> "text"
-sleep 0.3
+sleep "${AGENT_LAUNCHER_TMUX_SEND_ENTER_DELAY:-1}"
 for _ in 1 2 3; do tmux send-keys -t <session> Enter; sleep 0.2; done
 ```
 
@@ -134,10 +135,10 @@ and instruct the target to read it.
 Codex and Gemini CLI can be slow to process input. If `Enter` arrives
 before the TUI has finished accepting the text, it gets swallowed.
 
-Fix: use `send-and-verify.sh`, which waits 0.3s after the text and
+Fix: use `send-and-verify.sh`, which waits after the text and
 then sends `Enter` three times at 0.2s intervals — the 3-Enter flush
 covers the swallow case without verify. Raw `send-keys` callers
-should replicate the same cadence (0.3s wait, then 3 Enters at 0.2s
+should replicate the same cadence (default 1s wait, then 3 Enters at 0.2s
 intervals) instead of a single `sleep 1`.
 
 ### 3. Text lands in wrong layer
