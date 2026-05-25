@@ -16,7 +16,9 @@ elif [ ! -d "${HOME:-}/.agents" ] && [ -d "$DEFAULT_AGENT_HOME/.agents" ]; then
   export HOME="$DEFAULT_AGENT_HOME"
 fi
 
-if command -v python3.12 >/dev/null 2>&1; then
+if [ -n "${PYTHON_BIN:-}" ]; then
+  :
+elif command -v python3.12 >/dev/null 2>&1; then
   PYTHON_BIN="$(command -v python3.12)"
 elif command -v python3.11 >/dev/null 2>&1; then
   PYTHON_BIN="$(command -v python3.11)"
