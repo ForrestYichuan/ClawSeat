@@ -194,7 +194,7 @@
     function loadData() {
       const el = document.getElementById('seat-status-data');
       const raw = el ? el.textContent.trim() : '';
-      if (!raw || raw === '__SEAT_STATUS_JSON__') {
+      if (!raw || raw === '__NO_DATA__') {
         return { generated_at: '', seats: [], task_registry: [], recent_timeline: [], summary: {} };
       }
       try { return JSON.parse(raw); } catch (error) {

@@ -18,6 +18,12 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- `core/scripts/seat_dashboard.html`: dashboard load guard now uses a distinct
+  `__NO_DATA__` sentinel, so wrapper injection no longer rewrites the fallback
+  branch and the opened dashboard renders seat data correctly.
+
 ### Added
 
 - `core/scripts/seat_status.py`, `core/scripts/seat_dashboard.html`, and
