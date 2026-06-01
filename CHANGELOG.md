@@ -18,6 +18,14 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `core/scripts/seat_status.py`, `core/scripts/seat_dashboard.html`, and
+  `core/scripts/seat_status.sh`: local ClawSeat seat activity control surface
+  that summarizes durable TODO/handoff/DELIVERY/STATUS state plus tmux session
+  liveness for the five-seat roster without reading secret files or tmux pane
+  content.
+
 ### Changed
 
 - A1: Operational migration of 6 Claude seats from `auth_mode=oauth` to
