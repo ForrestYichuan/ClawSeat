@@ -18,6 +18,20 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- `core/scripts/seat_dashboard.html`: dashboard load guard now uses a distinct
+  `__NO_DATA__` sentinel, so wrapper injection no longer rewrites the fallback
+  branch and the opened dashboard renders seat data correctly.
+
+### Added
+
+- `core/scripts/seat_status.py`, `core/scripts/seat_dashboard.html`, and
+  `core/scripts/seat_status.sh`: local ClawSeat seat activity control surface
+  that summarizes durable TODO/handoff/DELIVERY/STATUS state plus tmux session
+  liveness for the five-seat roster without reading secret files or tmux pane
+  content.
+
 ### Changed
 
 - A1: Operational migration of 6 Claude seats from `auth_mode=oauth` to
